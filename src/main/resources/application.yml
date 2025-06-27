@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: GitBase-Backend
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: idhere
+            client-secret: secrethere
+
