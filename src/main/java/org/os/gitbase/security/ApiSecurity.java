@@ -2,8 +2,11 @@ package org.os.gitbase.security;
 
 import jakarta.servlet.http.HttpServletResponse;
 import org.os.gitbase.constant.Constant;
+import org.os.gitbase.google.OAuth2UserService;
 import org.os.gitbase.jwt.JwtTokenProvider;
 import org.os.gitbase.security.config.AuthenticationEntry;
+import org.os.gitbase.security.config.OAuth2AuthenticationFailureHandler;
+import org.os.gitbase.security.config.OAuth2AuthenticationSuccessHandler;
 import org.os.gitbase.security.config.SpaCsrfTokenRequestHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,6 +53,14 @@ public class ApiSecurity {
             "/actuator/info"
     };
 
+    @Autowired
+    private OAuth2UserService customOAuth2UserService;
+
+    @Autowired
+    private OAuth2AuthenticationSuccessHandler oAuth2AuthenticationSuccessHandler;
+
+    @Autowired
+    private OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
     @Autowired
     public ApiSecurity(JwtTokenProvider jwtService, JwtAuthenticationFilter jwtFilter, UserDetailService userDetailsService, AuthenticationEntry authenticationEntry) {
         this.jwtService = jwtService;
@@ -100,6 +111,16 @@ public class ApiSecurity {
                                 Constant.REFRESH_TOKEN
                         )
                         .clearAuthentication(true)
+                )
+                .oauth2Login(oauth2 -> oauth2
+                        .authorizationEndpoint(authorization -> authorization
+                                .baseUri("/oauth2/authorize"))
+                        .redirectionEndpoint(redirection -> redirection
+                                .baseUri("/oauth2/callback/*"))
+                        .userInfoEndpoint(userInfo -> userInfo
+                                .userService(customOAuth2UserService))
+                        .successHandler(oAuth2AuthenticationSuccessHandler)
+                        .failureHandler(oAuth2AuthenticationFailureHandler)
                 )
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
                 .build();
