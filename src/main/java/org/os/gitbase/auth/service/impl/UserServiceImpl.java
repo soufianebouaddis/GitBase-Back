@@ -121,17 +121,42 @@ public class UserServiceImpl implements UserService {
 
     public UserInfo getUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetails userDetail = (UserDetails) authentication.getPrincipal();
-        String usernameFromAccessToken = userDetail.getUsername();
-        Optional<User> user = userRepository.findUserByEmail(usernameFromAccessToken);
-        if (user.isPresent()) {
-            User u = user.get();
-            String fullPath = u.getProfilePictureUrl();
-            if (fullPath != null) {
-                String filename = Paths.get(fullPath).getFileName().toString();
-                u.setProfilePictureUrl(filename);
+        String usernameFromAccessToken = null;
+        
+        // Handle different types of authentication principals
+        if (authentication.getPrincipal() instanceof org.springframework.security.core.userdetails.UserDetails) {
+            // For regular JWT authentication
+            org.springframework.security.core.userdetails.UserDetails userDetail = 
+                (org.springframework.security.core.userdetails.UserDetails) authentication.getPrincipal();
+            usernameFromAccessToken = userDetail.getUsername();
+        } else if (authentication.getPrincipal() instanceof org.springframework.security.oauth2.core.user.OAuth2User) {
+            // For OAuth2 authentication (Google)
+            org.springframework.security.oauth2.core.user.OAuth2User oauth2User = 
+                (org.springframework.security.oauth2.core.user.OAuth2User) authentication.getPrincipal();
+            
+            // Try to get email from attributes first, then fallback to name
+            if (oauth2User.getAttributes() != null && oauth2User.getAttributes().get("email") != null) {
+                usernameFromAccessToken = (String) oauth2User.getAttributes().get("email");
+            } else {
+                usernameFromAccessToken = oauth2User.getName();
             }
-            return userMapper.mapFromAuthUserToUserInfoResponse(u);
+        } else {
+            // Fallback for other authentication types
+            usernameFromAccessToken = authentication.getName();
+        }
+        
+        if (usernameFromAccessToken != null) {
+            Optional<User> user = userRepository.findUserByEmail(usernameFromAccessToken);
+            if (user.isPresent()) {
+                User u = user.get();
+                String fullPath = u.getProfilePictureUrl();
+                if (fullPath != null && !fullPath.startsWith("http")) {
+                    // Only extract filename for local file paths
+                    String filename = Paths.get(fullPath).getFileName().toString();
+                    u.setProfilePictureUrl(filename);
+                }
+                return userMapper.mapFromAuthUserToUserInfoResponse(u);
+            }
         }
         return new UserInfo();
     }
@@ -141,7 +166,8 @@ public class UserServiceImpl implements UserService {
         if (authentication.isAuthenticated()) {
             User user = detailService.loadUserByUsername(authRequestDTO.getEmail());
             String fullPath = user.getProfilePictureUrl();
-            if (fullPath != null) {
+            if (fullPath != null && !fullPath.startsWith("http")) {
+                // Only extract filename for local file paths
                 String filename = Paths.get(fullPath).getFileName().toString();
                 user.setProfilePictureUrl(filename);
             }

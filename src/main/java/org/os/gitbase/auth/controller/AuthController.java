@@ -3,14 +3,15 @@ package org.os.gitbase.auth.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
+
 import lombok.extern.slf4j.Slf4j;
 import org.os.gitbase.auth.dto.*;
+import org.os.gitbase.auth.entity.User;
 import org.os.gitbase.auth.entity.jwt.RefreshToken;
 import org.os.gitbase.auth.service.UserService;
 import org.os.gitbase.common.ApiResponseEntity;
 import org.os.gitbase.constant.Constant;
-import org.os.gitbase.google.OAuth2UserService;
+
 import org.os.gitbase.google.GoogleTokenVerifier;
 import org.os.gitbase.google.GoogleUserInfo;
 import org.os.gitbase.jwt.JwtTokenProvider;
@@ -18,16 +19,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
-import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
-import org.springframework.security.oauth2.core.OAuth2AccessToken;
-import org.springframework.security.oauth2.core.OAuth2RefreshToken;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseCookie;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -62,6 +62,151 @@ public class AuthController {
                 HttpStatus.OK,
                 "OAuth2 endpoints are properly configured"
         ));
+    }
+
+    /**
+     * Register a new user
+     */
+    @PostMapping("/register")
+    public ResponseEntity<ApiResponseEntity<AuthResponse>> register(
+            @Valid @RequestBody RegisterDTO registerDTO,
+            HttpServletResponse response) {
+        try {
+            // Check if user already exists
+            UserInfo existingUser = userService.findByEmail(registerDTO.getEmail());
+            if (existingUser != null) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(new ApiResponseEntity<>(
+                                Instant.now(),
+                                false,
+                                "User with this email already exists",
+                                HttpStatus.CONFLICT,
+                                null
+                        ));
+            }
+
+            // Create new user
+            User newUser = new User();
+            newUser.setName(registerDTO.getName());
+            newUser.setEmail(registerDTO.getEmail());
+            newUser.setPassword(registerDTO.getPassword()); 
+            newUser.setAuthProvider(org.os.gitbase.auth.entity.enums.AuthProvider.LOCAL);
+            newUser.setEnabled(true);
+            newUser.setEmailVerified(false);
+            
+            User savedUser = userService.add(newUser);
+
+            // Generate tokens
+            String accessToken = jwtTokenProvider.generateToken(savedUser.getEmail(), 
+                    savedUser.getRoles().stream()
+                            .map(role -> role.getRoleName())
+                            .toList());
+            RefreshToken refreshToken = jwtTokenProvider.createRefreshToken(savedUser.getEmail());
+
+            // Create user info
+            UserInfo userInfo = new UserInfo(
+                    savedUser.getId(),
+                    savedUser.getName(),
+                    savedUser.getEmail(),
+                    savedUser.getProfilePictureUrl(),
+                    savedUser.getRoles()
+            );
+
+            AuthResponse authResponse = AuthResponse.builder()
+                    .accessToken(accessToken)
+                    .refreshToken(refreshToken.getToken())
+                    .tokenType("Bearer")
+                    .expiresIn(3600L)
+                    .user(userInfo)
+                    .build();
+
+            // Set cookies
+            response.addHeader("Set-Cookie", 
+                    userService.createAccessTokenCookie(accessToken).toString());
+            response.addHeader("Set-Cookie", 
+                    userService.createRefreshTokenCookie(refreshToken.getToken()).toString());
+
+            return ResponseEntity.ok(new ApiResponseEntity<>(
+                    Instant.now(),
+                    true,
+                    "User registered successfully",
+                    HttpStatus.OK,
+                    authResponse
+            ));
+
+        } catch (Exception e) {
+            log.error("Error during user registration", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponseEntity<>(
+                            Instant.now(),
+                            false,
+                            "Internal server error during registration",
+                            HttpStatus.INTERNAL_SERVER_ERROR,
+                            null
+                    ));
+        }
+    }
+
+    /**
+     * Login with email and password
+     */
+    @PostMapping("/login")
+    public ResponseEntity<ApiResponseEntity<AuthResponse>> login(
+            @Valid @RequestBody LoginDTO loginDTO,
+            HttpServletResponse response) {
+        try {
+            // Authenticate user
+            Map<String, ResponseCookie> cookies = userService.authenticate(loginDTO);
+            
+            // Get user info
+            UserInfo userInfo = userService.findByEmail(loginDTO.getEmail());
+            
+            if (userInfo != null) {
+                // Extract tokens from cookies
+                String accessToken = cookies.get(Constant.ACCESS_TOKEN).getValue();
+                String refreshToken = cookies.get(Constant.REFRESH_TOKEN).getValue();
+
+                AuthResponse authResponse = AuthResponse.builder()
+                        .accessToken(accessToken)
+                        .refreshToken(refreshToken)
+                        .tokenType("Bearer")
+                        .expiresIn(3600L)
+                        .user(userInfo)
+                        .build();
+
+                // Set cookies
+                response.addHeader("Set-Cookie", cookies.get(Constant.ACCESS_TOKEN).toString());
+                response.addHeader("Set-Cookie", cookies.get(Constant.REFRESH_TOKEN).toString());
+
+                return ResponseEntity.ok(new ApiResponseEntity<>(
+                        Instant.now(),
+                        true,
+                        "Login successful",
+                        HttpStatus.OK,
+                        authResponse
+                ));
+            } else {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(new ApiResponseEntity<>(
+                                Instant.now(),
+                                false,
+                                "Invalid credentials",
+                                HttpStatus.UNAUTHORIZED,
+                                null
+                        ));
+            }
+
+        } catch (Exception e) {
+            log.error("Error during login", e);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(new ApiResponseEntity<>(
+                            Instant.now(),
+                            false,
+                            "Invalid credentials",
+                            HttpStatus.UNAUTHORIZED,
+                            null
+                    ));
+        }
     }
 
     /**

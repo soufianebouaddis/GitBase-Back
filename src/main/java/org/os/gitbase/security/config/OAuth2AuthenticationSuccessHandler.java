@@ -9,7 +9,10 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.os.gitbase.auth.dto.AuthResponse;
 import org.os.gitbase.auth.dto.UserInfo;
+import org.os.gitbase.auth.entity.User;
 import org.os.gitbase.auth.entity.jwt.RefreshToken;
+import org.os.gitbase.auth.mapper.UserMapper;
+import org.os.gitbase.auth.repository.UserRepository;
 import org.os.gitbase.common.ApiResponseEntity;
 import org.os.gitbase.google.UserPrincipal;
 import org.os.gitbase.jwt.JwtTokenProvider;
@@ -34,6 +37,15 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
 
     @Autowired
     private JwtTokenProvider tokenProvider;
+    
+    @Autowired
+    private UserRepository userRepository;
+    
+    @Autowired
+    private UserMapper userMapper;
+
+    @Autowired
+    private org.os.gitbase.auth.repository.RoleRepository roleRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new JavaTimeModule());
@@ -47,73 +59,72 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
         log.info("Authentication principal: {}", authentication.getPrincipal());
 
         try {
-            // Handle different types of OAuth2 users
-            String email = null;
-            String name = null;
-            String profilePictureUrl = null;
-            List<String> roles = new ArrayList<>();
-            
-            if (authentication.getPrincipal() instanceof org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser) {
-                org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser oidcUser = 
-                    (org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser) authentication.getPrincipal();
-                
+            // Prepare variables
+            String email;
+            String name;
+            String profilePictureUrl;
+            List<String> roles;
+
+            if (authentication.getPrincipal() instanceof org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser oidcUser) {
                 email = oidcUser.getEmail();
                 name = oidcUser.getName();
                 profilePictureUrl = oidcUser.getPicture();
                 roles = oidcUser.getAuthorities().stream()
                         .map(GrantedAuthority::getAuthority)
                         .collect(Collectors.toList());
-                        
-            } else if (authentication.getPrincipal() instanceof UserPrincipal) {
-                UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
+            } else if (authentication.getPrincipal() instanceof UserPrincipal userPrincipal) {
                 email = userPrincipal.getEmail();
                 name = userPrincipal.getName();
                 if (userPrincipal.getAttributes() != null) {
                     profilePictureUrl = (String) userPrincipal.getAttributes().get("picture");
+                } else {
+                    profilePictureUrl = null;
                 }
                 roles = userPrincipal.getAuthorities().stream()
                         .map(GrantedAuthority::getAuthority)
                         .collect(Collectors.toList());
             } else {
-                // Fallback for other OAuth2 user types
                 email = authentication.getName();
                 name = authentication.getName();
+                profilePictureUrl = null;
                 roles = authentication.getAuthorities().stream()
                         .map(GrantedAuthority::getAuthority)
                         .collect(Collectors.toList());
             }
-            
+
             if (email == null) {
                 throw new RuntimeException("Email not found in OAuth2 user");
             }
 
-            String accessToken = tokenProvider.generateToken(email, roles);
-            
-            // For OAuth2 users, create a simple refresh token without requiring database user
-            RefreshToken refreshToken;
-            try {
-                refreshToken = tokenProvider.createRefreshToken(email);
-            } catch (Exception e) {
-                log.warn("Could not create refresh token for OAuth2 user: {}. Creating simple token.", email);
-                // Create a simple refresh token for OAuth2 users
-                refreshToken = RefreshToken.builder()
-                        .token(UUID.randomUUID().toString())
-                        .expiryDate(Instant.now().plusMillis(28800000)) // 8 hours
-                        .build();
-            }
+            // Get the actual user from database, or create if not exists
+            User user = userRepository.findUserByEmail(email).orElseGet(() -> {
+                User newUser = new User();
+                newUser.setEmail(email);
+                newUser.setName(name);
+                newUser.setProfilePictureUrl(profilePictureUrl);
+                newUser.setAuthProvider(org.os.gitbase.auth.entity.enums.AuthProvider.GOOGLE);
+                newUser.setEmailVerified(true);
+                newUser.setEnabled(true);
+                newUser.setLastLogin(java.time.LocalDateTime.now());
+                // Assign default role
+                org.os.gitbase.auth.entity.Role userRole = roleRepository.findRoleByRoleName("ROLE_USER")
+                    .orElseThrow(() -> new RuntimeException("Default USER role not found."));
+                java.util.HashSet<org.os.gitbase.auth.entity.Role> rolesSet = new java.util.HashSet<>();
+                rolesSet.add(userRole);
+                newUser.setRoles(rolesSet);
+                return userRepository.save(newUser);
+            });
 
-            // Create user info
-            UserInfo userInfo = new UserInfo(
-                    UUID.randomUUID(), // Generate a new UUID for OAuth2 users
-                    name,
-                    email,
-                    profilePictureUrl,
-                    roles.stream()
-                            .map(role -> org.os.gitbase.auth.entity.Role.builder()
-                                    .roleName(role)
-                                    .build())
-                            .collect(Collectors.toSet())
-            );
+            log.info("Found or created user in database: {} with ID: {}", user.getEmail(), user.getId());
+
+            String accessToken = tokenProvider.generateToken(email, roles);
+
+            // Create refresh token for the user
+            RefreshToken refreshToken = tokenProvider.createRefreshToken(email);
+
+            // Create user info from the actual database user
+            UserInfo userInfo = userMapper.mapFromAuthUserToUserInfoResponse(user);
+            log.info("Created UserInfo from database user: {}", userInfo);
 
             // Create auth response
             AuthResponse authResponse = AuthResponse.builder()
@@ -157,19 +168,19 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
             String jsonResponse = objectMapper.writeValueAsString(apiResponse);
             response.getWriter().write(jsonResponse);
 
-            log.info("OAuth2 login successful for user: {}", email);
-            
+            log.info("OAuth2 login successful for user: {} with ID: {}", email, user.getId());
+
             // Clear authentication attributes
             clearAuthenticationAttributes(request);
-            
+
         } catch (Exception e) {
             log.error("Error in OAuth2 success handler", e);
-            
+
             // Return error response as JSON
             response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.setCharacterEncoding("UTF-8");
-            
+
             ApiResponseEntity<String> errorResponse = new ApiResponseEntity<>(
                     Instant.now(),
                     false,
@@ -177,7 +188,7 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     null
             );
-            
+
             String errorJson = objectMapper.writeValueAsString(errorResponse);
             response.getWriter().write(errorJson);
         }

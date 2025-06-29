@@ -62,8 +62,15 @@ public class OAuth2AuthenticationFailureHandler extends SimpleUrlAuthenticationF
                 } else if (exception.getMessage().contains("invalid_request")) {
                     errorType = "invalid_request";
                     errorMessage = "Invalid OAuth2 request";
+                } else {
+                    errorMessage = exception.getMessage();
                 }
             }
+        }
+
+        // Ensure errorMessage is not null before encoding
+        if (errorMessage == null) {
+            errorMessage = "Unknown authentication error";
         }
 
         String encodedErrorMessage = URLEncoder.encode(errorMessage, StandardCharsets.UTF_8);

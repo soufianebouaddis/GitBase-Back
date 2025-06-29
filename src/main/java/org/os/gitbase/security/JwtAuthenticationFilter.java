@@ -70,12 +70,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
             username = this.tokenProvider.extractUsername(token);
             if (username != null) {
-                UserDetails userDetails = userDetailService.loadUserByUsername(username);
-                if (this.tokenProvider.validateToken(token, userDetails)) {
-                    UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(
-                            userDetails, null, userDetails.getAuthorities());
-                    authenticationToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(authenticationToken);
+                try {
+                    UserDetails userDetails = userDetailService.loadUserByUsername(username);
+                    if (this.tokenProvider.validateToken(token, userDetails)) {
+                        UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities());
+                        authenticationToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(authenticationToken);
+                    }
+                } catch (jakarta.persistence.EntityNotFoundException e) {
+                    logger.warn("User not found in database for token: {}", username);
+                    // Continue with the filter chain without setting authentication
                 }
             }
         } catch (ExpiredJwtException e) {
