@@ -1,0 +1,56 @@
+spring:
+  spring:
+    security:
+      oauth2:
+        client:
+          registration:
+            google:
+              client-id: ${GOOGLE_CLIENT_ID}
+              client-secret: ${GOOGLE_CLIENT_SECRET}
+              scope:
+                - openid
+                - profile
+                - email
+              redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+              client-name: Google
+          provider:
+            google:
+              authorization-uri: https://accounts.google.com/o/oauth2/v2/auth
+              token-uri: https://oauth2.googleapis.com/token
+              user-info-uri: https://www.googleapis.com/oauth2/v2/userinfo
+              user-name-attribute: email
+  datasource:
+    url: jdbc:postgresql://localhost:5432/gitbase_dev
+    username: root
+    password: root
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    show-sql: true
+#  flyway:
+#    clean-disabled: false
+
+
+logging:
+  level:
+    org.springframework.web: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.flywaydb: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,info,metrics,env,beans"
+  endpoint:
+    health:
+      show-details: always
+    metrics:
+      access: read_only
+#    flyway:
+#      access: read_only
+    env:
+      access: read_only
+jwt-keys:
+  private_key: ${PRIV_KEY:MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCo/X75ARsLPSYogiCbD4xMvjfJJZWfXKrGHfkSIHt5vLWr0h3i/DlV7RDFmmnHDckzhPlhFjjjCCmkmMFs36Xox8MeuqOJsXOOlkD6DyGlfJN27XSkt92KbEuvvsaIEqBnNMqRKM2h7xVtTNRvt0Wn/GfHnpylJUNCI265iksSobrv4waITafe8REd8FrnqUJIhgb8N5SL/RSSg7uTE3bBzqZDNG3olu5EDs4oG+niSobeWJ+eZ00k3nNcxs2hcsRV/FNn+A0fueFT7YYOnJeNpSDfaOHfRywZOCAdvGTROP/1sbq9MBTE/TPDRiqgP8ncOG0QbDe8WoBR/kKJP4DbAgMBAAECggEAGWIaVGSqH0IMHUGOjDwFovFfh8MxekJ9FE0kQGjIozyJPUnOW23vXszBHC1ZfiC//BEZNFAWM2PifWrEgwoE7bYzxMXcEq6o4N4I3IaxUx4nOFHql2NWz5f8tmU9hOrnVRlE5BDw8kXrPgOwVSd+OwFaxU050kSKmcCgvRXcuOt7fE2ythiEFyo67uWSHLGS8vntmkbbieCMDd7m/TWwg+qjNawJzLJSD2irxbkzkVBb8u3zJAvGbtfZC4iDzcCY5VABn7lhsRtfKSo4ZPkB1XT10AhQoqok9LY3C3HxfvoYMphZF2WY08RKiVYPwQ0pWy+gAPP2D2/suPQdZvV1YQKBgQDehpYKe74XAE20ENY4JkBu8RFzGcbtfy4/Q+pGiY/PL6maiffesKvcNMRs6a4nPv/9GokLoPhmKV/H0SZY6/1GbM0QFgPlyR5ghhy2bvK1Eh0YmSWxuP2iF/emcMVOKeYReWFiipgdyzoR0jTqAxi8KtuRYbfFs5/Ko7YHFYXH5QKBgQDCaUUavbtNeKKvTcqIOQs24IjY2KZilX3acf6LgM+L2+s7W6K5OXm307fv5pu0bOOgddkyx+PCZv65msYGfWFYuZ9tWjKHzoScdcbIx3fG2jkzuuuwBSK/mzoi4KOIo3xapr2uOyhXrmuxjgWtcdrzQxK2Atw1MklsvO12j6IZvwKBgE7gKcLhhcmlY+WVqjkQ5fntHSBNXMPGNuBZ9Gq4S+9Gl7mdeezHdsOBOLbaRc7Hd/mBNF6Y2jNsKvUq34rZa1dRLYasJwmGNmxEXV0VCpbAKuwTLNdIGS8hi7jFdEp2c4RyH+DL+4tkA9tZRURFgLkB//4SQw+i0dsEGHt+V4M5AoGAdEKv6MX99N5nq55BuCUk57RvIf6twdbUZIY3SwXFGEZz7hNmxI3ylFQwc27dPpC/r33KXevb8K3XNvev5MGmLYEULjj6buy5sTddoURoBKsL+juWJrVrilox8hmUsmnSPAPq+v61qXnNPWlJS+gCn+dEkUQ0nDtuXXC+MWDD99ECgYEAy9YsTVum/8ORjrlSsjPDhj6gzG6XhB9HpZhBMuhuV09TraLqR43o4c3W8W0aJmORBDI6/+dbdG9OA6cOx2SxRJtIIuizXnlsG6bIu9GDN5vddwTtj0jkd3yz8m7p2IbMBxUSUWYtUa5QTXkpAaQWiXKZMAnUIDNZyYhcZvQmdgM=}
+  public_key: ${PUB_KEY:MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqP1++QEbCz0mKIIgmw+MTL43ySWVn1yqxh35EiB7eby1q9Id4vw5Ve0QxZppxw3JM4T5YRY44wgppJjBbN+l6MfDHrqjibFzjpZA+g8hpXyTdu10pLfdimxLr77GiBKgZzTKkSjNoe8VbUzUb7dFp/xnx56cpSVDQiNuuYpLEqG67+MGiE2n3vERHfBa56lCSIYG/DeUi/0UkoO7kxN2wc6mQzRt6JbuRA7OKBvp4kqG3lifnmdNJN5zXMbNoXLEVfxTZ/gNH7nhU+2GDpyXjaUg32jh30csGTggHbxk0Tj/9bG6vTAUxP0zw0YqoD/J3DhtEGw3vFqAUf5CiT+A2wIDAQAB}
