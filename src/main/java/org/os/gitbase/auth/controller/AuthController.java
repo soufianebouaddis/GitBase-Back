@@ -30,6 +30,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.security.crypto.password.PasswordEncoder;
+
 @RestController
 @RequestMapping(Constant.AUTH_MAPPING_REQUEST)
 @Slf4j
@@ -39,15 +41,17 @@ public class AuthController {
     private final JwtTokenProvider jwtTokenProvider;
     private final GoogleTokenVerifier googleTokenVerifier;
     private final SecurityContextLogoutHandler logoutHandler;
+    private final PasswordEncoder passwordEncoder;
     
     @Autowired(required = false)
     private OAuth2AuthorizedClientService authorizedClientService;
 
-    public AuthController(UserService userService, JwtTokenProvider jwtTokenProvider, GoogleTokenVerifier googleTokenVerifier, SecurityContextLogoutHandler logoutHandler) {
+    public AuthController(UserService userService, JwtTokenProvider jwtTokenProvider, GoogleTokenVerifier googleTokenVerifier, SecurityContextLogoutHandler logoutHandler, PasswordEncoder passwordEncoder) {
         this.userService = userService;
         this.jwtTokenProvider = jwtTokenProvider;
         this.googleTokenVerifier = googleTokenVerifier;
         this.logoutHandler = logoutHandler;
+        this.passwordEncoder = passwordEncoder;
     }
 
     /**
@@ -68,13 +72,12 @@ public class AuthController {
      * Register a new user
      */
     @PostMapping("/register")
-    public ResponseEntity<ApiResponseEntity<AuthResponse>> register(
-            @Valid @RequestBody RegisterDTO registerDTO,
-            HttpServletResponse response) {
+    public ResponseEntity<ApiResponseEntity<String>> register(
+            @Valid @RequestBody RegisterDTO registerDTO) {
         try {
             // Check if user already exists
-            UserInfo existingUser = userService.findByEmail(registerDTO.getEmail());
-            if (existingUser != null) {
+            boolean exists = userService.existsByEmail(registerDTO.getEmail());
+            if (exists) {
                 return ResponseEntity.status(HttpStatus.CONFLICT)
                         .body(new ApiResponseEntity<>(
                                 Instant.now(),
@@ -89,49 +92,18 @@ public class AuthController {
             User newUser = new User();
             newUser.setName(registerDTO.getName());
             newUser.setEmail(registerDTO.getEmail());
-            newUser.setPassword(registerDTO.getPassword()); 
+            newUser.setPassword(passwordEncoder.encode(registerDTO.getPassword()));
             newUser.setAuthProvider(org.os.gitbase.auth.entity.enums.AuthProvider.LOCAL);
             newUser.setEnabled(true);
             newUser.setEmailVerified(false);
-            
-            User savedUser = userService.add(newUser);
-
-            // Generate tokens
-            String accessToken = jwtTokenProvider.generateToken(savedUser.getEmail(), 
-                    savedUser.getRoles().stream()
-                            .map(role -> role.getRoleName())
-                            .toList());
-            RefreshToken refreshToken = jwtTokenProvider.createRefreshToken(savedUser.getEmail());
-
-            // Create user info
-            UserInfo userInfo = new UserInfo(
-                    savedUser.getId(),
-                    savedUser.getName(),
-                    savedUser.getEmail(),
-                    savedUser.getProfilePictureUrl(),
-                    savedUser.getRoles()
-            );
-
-            AuthResponse authResponse = AuthResponse.builder()
-                    .accessToken(accessToken)
-                    .refreshToken(refreshToken.getToken())
-                    .tokenType("Bearer")
-                    .expiresIn(3600L)
-                    .user(userInfo)
-                    .build();
-
-            // Set cookies
-            response.addHeader("Set-Cookie", 
-                    userService.createAccessTokenCookie(accessToken).toString());
-            response.addHeader("Set-Cookie", 
-                    userService.createRefreshTokenCookie(refreshToken.getToken()).toString());
+            userService.add(newUser);
 
             return ResponseEntity.ok(new ApiResponseEntity<>(
                     Instant.now(),
                     true,
                     "User registered successfully",
                     HttpStatus.OK,
-                    authResponse
+                    null
             ));
 
         } catch (Exception e) {

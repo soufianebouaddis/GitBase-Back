@@ -35,4 +35,6 @@ public interface UserService {
 
     RefreshToken getTokenOfUserByUsername(String username);
 
+    boolean existsByEmail(String email);
+
 }

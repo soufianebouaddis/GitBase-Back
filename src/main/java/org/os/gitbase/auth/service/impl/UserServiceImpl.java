@@ -28,6 +28,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.os.gitbase.auth.entity.enums.AuthProvider;
 
 
 @Service
@@ -165,11 +166,12 @@ public class UserServiceImpl implements UserService {
         Authentication authentication = authenticateUser(authRequestDTO);
         if (authentication.isAuthenticated()) {
             User user = detailService.loadUserByUsername(authRequestDTO.getEmail());
-            String fullPath = user.getProfilePictureUrl();
-            if (fullPath != null && !fullPath.startsWith("http")) {
-                // Only extract filename for local file paths
-                String filename = Paths.get(fullPath).getFileName().toString();
-                user.setProfilePictureUrl(filename);
+            if (user.getAuthProvider() == AuthProvider.GOOGLE) {
+                String fullPath = user.getProfilePictureUrl();
+                if (fullPath != null && !fullPath.startsWith("http")) {
+                    String filename = Paths.get(fullPath).getFileName().toString();
+                    user.setProfilePictureUrl(filename);
+                }
             }
             user.setLastLogin(LocalDateTime.now());
             userRepository.save(user);
@@ -215,5 +217,10 @@ public class UserServiceImpl implements UserService {
     public RefreshToken getTokenOfUserByUsername(String email) {
         return refreshTokenRepository.findRefreshTokenByEmail(email).orElseThrow(
                 () -> new EntityNotFoundException("User not found"));
+    }
+
+    @Override
+    public boolean existsByEmail(String email) {
+        return userRepository.findUserByEmail(email).isPresent();
     }
 }

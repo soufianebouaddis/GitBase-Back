@@ -145,7 +145,6 @@ public class ApiSecurity {
                         .clearAuthentication(true))
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
                 .build();
-
     }
 
     @Bean
