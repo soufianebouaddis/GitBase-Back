@@ -1,7 +1,6 @@
 package org.os.gitbase.auth.service.impl;
 
 import jakarta.persistence.EntityNotFoundException;
-import org.checkerframework.checker.units.qual.A;
 import org.os.gitbase.auth.dto.LoginDTO;
 import org.os.gitbase.auth.dto.UserInfo;
 import org.os.gitbase.auth.entity.Role;
@@ -21,7 +20,6 @@ import org.springframework.security.authentication.AuthenticationManager;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.nio.file.Paths;
-import java.time.Instant;
 
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;

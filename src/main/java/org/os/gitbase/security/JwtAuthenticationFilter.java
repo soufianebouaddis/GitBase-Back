@@ -39,10 +39,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response,
                                     @NonNull FilterChain filterChain)
             throws ServletException, IOException {
-        if (Constant.REFRESH_TOKEN_MAPPING_REQUEST.equals(request.getRequestURI())) {
+        String requestURI = request.getRequestURI();
+        
+        // Skip JWT processing for OAuth2 and refresh token endpoints
+        if (Constant.REFRESH_TOKEN_MAPPING_REQUEST.equals(requestURI) ||
+            requestURI.startsWith("/oauth2/") ||
+            requestURI.startsWith("/login/oauth2/code/")) {
             filterChain.doFilter(request, response);
             return;
         }
+        
         String token = null;
         String username = null;
 

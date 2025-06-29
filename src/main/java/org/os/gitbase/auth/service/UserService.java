@@ -9,7 +9,6 @@ import org.springframework.security.core.Authentication;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 public interface UserService {

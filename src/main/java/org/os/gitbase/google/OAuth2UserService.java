@@ -23,10 +23,15 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
     @Override
     @Transactional
     public OAuth2User loadUser(OAuth2UserRequest oAuth2UserRequest) throws OAuth2AuthenticationException {
+        log.info("OAuth2UserService.loadUser called for registration: {}", oAuth2UserRequest.getClientRegistration().getRegistrationId());
+        
         OAuth2User oAuth2User = super.loadUser(oAuth2UserRequest);
+        log.info("OAuth2User loaded: {}", oAuth2User.getName());
 
         try {
-            return processOAuth2User(oAuth2UserRequest, oAuth2User);
+            OAuth2User processedUser = processOAuth2User(oAuth2UserRequest, oAuth2User);
+            log.info("OAuth2User processed successfully: {}", processedUser.getName());
+            return processedUser;
         } catch (Exception ex) {
             log.error("Error processing OAuth2 user", ex);
             throw new OAuth2AuthenticationException("Error processing OAuth2 user");

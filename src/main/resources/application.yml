@@ -1,3 +1,4 @@
+
 spring:
   application:
     name: GitBase-Backend
@@ -16,3 +17,5 @@ spring:
 #  baseline-on-migrate: true
 #  validate-on-migrate: true
 #  clean-disabled: true
+server:
+  port: 8880

@@ -137,6 +137,12 @@
 			<version>1.78</version>
 		</dependency>
 		<!--		END-->
+		<!--	JACKSON JSR310	-->
+		<dependency>
+			<groupId>com.fasterxml.jackson.datatype</groupId>
+			<artifactId>jackson-datatype-jsr310</artifactId>
+		</dependency>
+		<!--		END-->
 	</dependencies>
 
 	<build>
