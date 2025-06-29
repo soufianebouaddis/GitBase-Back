@@ -139,9 +139,6 @@ public class AuthController {
                 String refreshToken = cookies.get(Constant.REFRESH_TOKEN).getValue();
 
                 AuthResponse authResponse = AuthResponse.builder()
-                        .accessToken(accessToken)
-                        .refreshToken(refreshToken)
-                        .tokenType("Bearer")
                         .expiresIn(3600L)
                         .user(userInfo)
                         .build();
@@ -239,9 +236,6 @@ public class AuthController {
                     RefreshToken refreshTokenEntity = jwtTokenProvider.createRefreshToken(googleUserInfo.getEmail());
                     
                     AuthResponse authResponse = AuthResponse.builder()
-                            .accessToken(accessToken)
-                            .refreshToken(refreshTokenEntity.getToken())
-                            .tokenType("Bearer")
                             .expiresIn(3600L)
                             .user(userInfo)
                             .build();
@@ -354,9 +348,6 @@ public class AuthController {
                             .toList());
                     
                     AuthResponse authResponse = AuthResponse.builder()
-                            .accessToken(newAccessToken)
-                            .refreshToken(refreshToken)
-                            .tokenType("Bearer")
                             .expiresIn(3600L)
                             .build();
                     
