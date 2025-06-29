@@ -30,6 +30,7 @@ spring:
 app:
   oauth2:
     authorized-redirect-uri: http://localhost:5173/oauth2/callback
+    frontend-redirect-uri: http://localhost:5173/dashboard
 
 
 logging:

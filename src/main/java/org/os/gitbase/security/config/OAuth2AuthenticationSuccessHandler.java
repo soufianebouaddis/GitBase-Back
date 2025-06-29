@@ -17,6 +17,7 @@ import org.os.gitbase.common.ApiResponseEntity;
 import org.os.gitbase.google.UserPrincipal;
 import org.os.gitbase.jwt.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
@@ -46,7 +47,8 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
 
     @Autowired
     private org.os.gitbase.auth.repository.RoleRepository roleRepository;
-
+    @Value("${app.oauth2.frontend-redirect-uri}")
+    private String frontendRedirectUri;
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new JavaTimeModule());
 
@@ -127,19 +129,19 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
             log.info("Created UserInfo from database user: {}", userInfo);
 
             // Create auth response
-            AuthResponse authResponse = AuthResponse.builder()
-                    .expiresIn(3600L)
-                    .user(userInfo)
-                    .build();
+//            AuthResponse authResponse = AuthResponse.builder()
+//                    .expiresIn(3600L)
+//                    .user(userInfo)
+//                    .build();
 
-            // Create API response wrapper
-            ApiResponseEntity<AuthResponse> apiResponse = new ApiResponseEntity<>(
-                    Instant.now(),
-                    true,
-                    "OAuth2 authentication successful",
-                    HttpStatus.OK,
-                    authResponse
-            );
+//            // Create API response wrapper
+//            ApiResponseEntity<AuthResponse> apiResponse = new ApiResponseEntity<>(
+//                    Instant.now(),
+//                    true,
+//                    "OAuth2 authentication successful",
+//                    HttpStatus.OK,
+//                    authResponse
+//            );
 
             // Set cookies
             Cookie accessTokenCookie = new Cookie(Constant.ACCESS_TOKEN, accessToken);
@@ -161,15 +163,12 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.setCharacterEncoding("UTF-8");
 
-            // Write JSON response
-            String jsonResponse = objectMapper.writeValueAsString(apiResponse);
-            response.getWriter().write(jsonResponse);
 
             log.info("OAuth2 login successful for user: {} with ID: {}", email, user.getId());
 
             // Clear authentication attributes
             clearAuthenticationAttributes(request);
-
+            response.sendRedirect(frontendRedirectUri);
         } catch (Exception e) {
             log.error("Error in OAuth2 success handler", e);
 

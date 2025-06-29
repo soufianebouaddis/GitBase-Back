@@ -21,7 +21,7 @@ public class OAuth2AuthenticationFailureHandler extends SimpleUrlAuthenticationF
 
     private static final Logger logger = LoggerFactory.getLogger(OAuth2AuthenticationFailureHandler.class);
 
-    @Value("${app.oauth2.authorized-redirect-uri:http://localhost:3000/oauth2/redirect}")
+    @Value("${app.oauth2.authorized-redirect-uri:http://localhost:5173/oauth2/redirect}")
     private String authorizedRedirectUri;
 
     @Override
