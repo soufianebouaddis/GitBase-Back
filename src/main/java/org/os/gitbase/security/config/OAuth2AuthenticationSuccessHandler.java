@@ -128,9 +128,6 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
 
             // Create auth response
             AuthResponse authResponse = AuthResponse.builder()
-                    .accessToken(accessToken)
-                    .refreshToken(refreshToken.getToken())
-                    .tokenType("Bearer")
                     .expiresIn(3600L)
                     .user(userInfo)
                     .build();
