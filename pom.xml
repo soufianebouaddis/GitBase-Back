@@ -143,6 +143,13 @@
 			<artifactId>jackson-datatype-jsr310</artifactId>
 		</dependency>
 		<!--		END-->
+		<!--	GIT DEPENDENCY	-->
+		<dependency>
+			<groupId>org.eclipse.jgit</groupId>
+			<artifactId>org.eclipse.jgit</artifactId>
+			<version>7.3.0.202506031305-r</version>
+		</dependency>
+		<!--	END	-->
 	</dependencies>
 
 	<build>
