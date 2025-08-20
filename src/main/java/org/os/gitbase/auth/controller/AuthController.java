@@ -71,7 +71,7 @@ public class AuthController {
     /**
      * Register a new user
      */
-    @PostMapping("/register")
+    @PostMapping(Constant.REGISTER_MAPPING_REQUEST)
     public ResponseEntity<ApiResponseEntity<String>> register(
             @Valid @RequestBody RegisterDTO registerDTO) {
         try {
@@ -122,7 +122,7 @@ public class AuthController {
     /**
      * Login with email and password
      */
-    @PostMapping("/login")
+    @PostMapping(Constant.LOGIN_MAPPING_REQUEST)
     public ResponseEntity<ApiResponseEntity<AuthResponse>> login(
             @Valid @RequestBody LoginDTO loginDTO,
             HttpServletResponse response) {
@@ -181,7 +181,7 @@ public class AuthController {
     /**
      * Get OAuth2 authorization URL for Google
      */
-    @GetMapping("/oauth2/google/url")
+    @GetMapping(Constant.OAUTH2_GOOGLE_URL_REQUEST)
     public ResponseEntity<ApiResponseEntity<OAuthUrlResponse>> getGoogleOAuthUrl(HttpServletRequest request) {
         try {
             // Use Spring Security's built-in OAuth2 authorization endpoint
@@ -218,7 +218,7 @@ public class AuthController {
     /**
      * Authenticate with Google ID token
      */
-    @PostMapping("/google")
+    @PostMapping(Constant.GOOGLE_REQUEST)
     public ResponseEntity<ApiResponseEntity<AuthResponse>> authenticateWithGoogle(
             @Valid @RequestBody GoogleAuthRequest googleAuthRequest,
             HttpServletResponse response) {
@@ -289,7 +289,7 @@ public class AuthController {
     /**
      * Get current authenticated user info
      */
-    @GetMapping("/me")
+    @GetMapping(Constant.PROFILE_INFO_MAPPING_REQUEST)
     public ResponseEntity<ApiResponseEntity<UserInfo>> getCurrentUser() {
         try {
             UserInfo userInfo = userService.getUser();
@@ -328,7 +328,7 @@ public class AuthController {
     /**
      * Refresh access token using refresh token
      */
-    @PostMapping("/refresh")
+    @PostMapping(Constant.REFRESH_TOKEN_MAPPING_REQUEST)
     public ResponseEntity<ApiResponseEntity<AuthResponse>> refreshToken(
             HttpServletRequest request,
             HttpServletResponse response) {
@@ -388,7 +388,7 @@ public class AuthController {
     /**
      * Logout user and clear cookies
      */
-    @PostMapping("/logout")
+    @PostMapping(Constant.LOGOUT_MAPPING_REQUEST)
     public ResponseEntity<ApiResponseEntity<String>> logout(
             Authentication authentication,
             HttpServletRequest request,

@@ -20,7 +20,7 @@ import java.util.List;
 @Service
 public class CodeReviewService {
 
-    @Value("${anthropic.api.key}")
+    //@Value("${anthropic.api.key}")
     private String anthropicApiKey;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final RestTemplate restTemplate = new RestTemplate();

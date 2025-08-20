@@ -7,5 +7,12 @@ public class Constant {
     public static final String XSRF_TOKEN = "XSRF-TOKEN";
     //AUTH ENDPOINT
     public static final String AUTH_MAPPING_REQUEST = "/api/v1/auth";
-    public static final String REFRESH_TOKEN_MAPPING_REQUEST = AUTH_MAPPING_REQUEST+"/refreshToken";
+    public static final String REFRESH_TOKEN_MAPPING_REQUEST = "/refreshToken";
+    public static final String REGISTER_MAPPING_REQUEST = "/register";
+    public static final String LOGIN_MAPPING_REQUEST = "/login";
+    public static final String PROFILE_INFO_MAPPING_REQUEST = "/profile-info";
+    public static final String LOGOUT_MAPPING_REQUEST = "/logout";
+    //GOOGLE OAUTH2 URLS
+    public static final String OAUTH2_GOOGLE_URL_REQUEST = "/oauth2/google/url";
+    public static final String GOOGLE_REQUEST = "/google";
 }
