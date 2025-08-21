@@ -60,7 +60,8 @@ public class ApiSecurity {
             "/api/v1/auth/oauth2/google/url",
             "/oauth2/**",
             "/login/oauth2/code/**",
-            "/api/v1/gitbase/create"
+            "/api/v1/gitbase/create",
+            "/api/v1/git/tokens"
     };
 
     @Autowired
