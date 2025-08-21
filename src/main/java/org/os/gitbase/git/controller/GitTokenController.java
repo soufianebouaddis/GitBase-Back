@@ -11,7 +11,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/v1/git/tokens")
+@RequestMapping("/api/v1/gitbase/tokens")
 public class GitTokenController {
 
     private final CommandGitService tokenService;

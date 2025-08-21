@@ -13,12 +13,14 @@ import org.os.gitbase.security.config.SpaCsrfTokenRequestHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.argon2.Argon2PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -46,7 +48,7 @@ public class ApiSecurity {
     private final JwtAuthenticationFilter jwtFilter;
     private final UserDetailService userDetailsService;
     private final AuthenticationEntry authenticationEntry;
-    private final UserRepository userRepository;
+
     @Value("${jwt-keys.public_key}")
     private String public_key;
     private final String[] matchers = {
@@ -75,15 +77,31 @@ public class ApiSecurity {
 
     @Autowired
     public ApiSecurity(JwtTokenProvider jwtService, JwtAuthenticationFilter jwtFilter,
-                       UserDetailService userDetailsService, AuthenticationEntry authenticationEntry, UserRepository userRepository) {
+                       UserDetailService userDetailsService, AuthenticationEntry authenticationEntry) {
         this.jwtService = jwtService;
         this.jwtFilter = jwtFilter;
         this.userDetailsService = userDetailsService;
         this.authenticationEntry = authenticationEntry;
-        this.userRepository = userRepository;
+
+    }
+    @Bean
+    @Order(1)
+    public SecurityFilterChain gitSecurity(HttpSecurity http, AuthenticationManager authManager) throws Exception {
+        http
+                .securityMatcher("/api/v1/gitbase/**")
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authenticationManager(authManager) // ✅ explicitly use your bean
+                .httpBasic(Customizer.withDefaults())
+                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
+
+        return http.build();
     }
 
+
+
     @Bean
+    @Order(2)
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.cors(Customizer.withDefaults())
                 .csrf(csrf -> {
@@ -124,8 +142,6 @@ public class ApiSecurity {
                         .requestMatchers("/api/v1/auth/oauth2/google/url").permitAll())
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/api/v1/auth/oauth2/test").permitAll())
-                .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/api/v1/gitbase/**").authenticated())
                 .authorizeHttpRequests(
                         authorize -> authorize
                                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
@@ -142,7 +158,7 @@ public class ApiSecurity {
                         .logoutSuccessHandler((req, res, auth) -> {
                             String origin = req.getHeader("Origin");
                             if ("http://localhost:5173".equals(origin)
-                                    || "http://localhost:8080".equals(origin)) {
+                                    || "http://localhost:8880".equals(origin)) {
                                 res.setHeader("Access-Control-Allow-Origin", origin);
                             }
                             res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -175,8 +191,8 @@ public class ApiSecurity {
         return authentication -> {
             String username = authentication.getName();
             String rawToken = authentication.getCredentials().toString();
-
-            if (tokenService.validate(userRepository.findUserByName(username).get(), rawToken)) {
+            System.out.println("username: " + username);
+            if (tokenService.validate(username, rawToken)) {
                 return new UsernamePasswordAuthenticationToken(username, rawToken, List.of(() -> "GIT_USER"));
             }
             throw new BadCredentialsException("Invalid Git token");
@@ -196,4 +212,8 @@ public class ApiSecurity {
                 1 << 12,
                 3);
     }
+
+
+
+
 }

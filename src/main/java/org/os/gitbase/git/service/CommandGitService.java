@@ -2,6 +2,7 @@ package org.os.gitbase.git.service;
 
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.transport.PacketLineOut;
 import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.RefAdvertiser;
 import org.eclipse.jgit.transport.UploadPack;
@@ -15,6 +16,7 @@ import org.os.gitbase.auth.repository.UserRepository;
 import org.os.gitbase.git.entity.GitToken;
 import org.os.gitbase.git.repository.GitTokenRepository;
 import org.os.gitbase.git.service.GitService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -23,6 +25,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.eclipse.jgit.transport.BasePackPushConnection.*;
@@ -30,7 +33,7 @@ import static org.eclipse.jgit.transport.BasePackPushConnection.*;
 public class CommandGitService  {
     private final GitTokenRepository repo;
     private final PasswordEncoder passwordEncoder;
-    private static final String BASE_PATH = "gitbase/repositories"; // root path
+    private static final String BASE_PATH = "./gitbase/repositories"; // root path
     private final UserRepository userRepository;
     public CommandGitService(GitTokenRepository repo, PasswordEncoder passwordEncoder, UserRepository userRepository) {
         this.repo = repo;
@@ -50,30 +53,46 @@ public class CommandGitService  {
     // --- Git advertise refs (GET /info/refs?service=git-upload-pack) ---
     public void handleInfoRefs(String username, String repoName, String service, HttpServletResponse response) {
         try (Repository repository = openRepository(username, repoName)) {
-            response.setContentType("application/x-" + service + "-advertisement");
-            response.setStatus(HttpServletResponse.SC_OK);
-
-            OutputStream out = response.getOutputStream();
-
-            // Write header in packet line format
-            String header = "# service=" + service + "\n";
-            writePacket(out, header);
-            writeFlush(out);
+            OutputStream rawOut = response.getOutputStream();
 
             if ("git-upload-pack".equals(service)) {
-                UploadPack uploadPack = new UploadPack(repository);
-                RefAdvertiser.PacketLineOutRefAdvertiser adv = new RefAdvertiser.PacketLineOutRefAdvertiser(new org.eclipse.jgit.transport.PacketLineOut(out));
-                uploadPack.sendAdvertisedRefs(adv);
+                response.setContentType("application/x-git-upload-pack-advertisement");
+
+                // 1. Write the service header
+                PacketLineOut plo = new PacketLineOut(rawOut);
+                plo.writeString("# service=" + service + "\n");
+                plo.end(); // flush (0000)
+
+                // 2. Advertise refs
+                UploadPack up = new UploadPack(repository);
+                RefAdvertiser adv = new RefAdvertiser.PacketLineOutRefAdvertiser(new PacketLineOut(rawOut));
+                up.sendAdvertisedRefs(adv);
+
             } else if ("git-receive-pack".equals(service)) {
-                ReceivePack receivePack = new ReceivePack(repository);
-                RefAdvertiser.PacketLineOutRefAdvertiser adv = new RefAdvertiser.PacketLineOutRefAdvertiser(new org.eclipse.jgit.transport.PacketLineOut(out));
-                receivePack.sendAdvertisedRefs(adv);
+                response.setContentType("application/x-git-receive-pack-advertisement");
+
+                // 1. Write the service header
+                PacketLineOut plo = new PacketLineOut(rawOut);
+                plo.writeString("# service=" + service + "\n");
+                plo.end();
+
+                // 2. Advertise refs
+                ReceivePack rp = new ReceivePack(repository);
+                RefAdvertiser adv = new RefAdvertiser.PacketLineOutRefAdvertiser(new PacketLineOut(rawOut));
+                rp.sendAdvertisedRefs(adv);
+
+            } else {
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Unsupported service: " + service);
+                return;
             }
 
+            rawOut.flush();
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Error in handleInfoRefs", e);
         }
     }
+
+
 
     // --- Git fetch/clone (POST /git-upload-pack) ---
     public void handleUploadPack(String username, String repoName,
@@ -81,9 +100,12 @@ public class CommandGitService  {
         try (Repository repository = openRepository(username, repoName)) {
             response.setContentType("application/x-git-upload-pack-result");
             UploadPack uploadPack = new UploadPack(repository);
-            uploadPack.upload(request.getInputStream(), response.getOutputStream(), System.err);
+
+            // Stream only to response, avoid System.err
+            uploadPack.upload(request.getInputStream(), response.getOutputStream(), response.getOutputStream());
+
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Error in handleUploadPack", e);
         }
     }
 
@@ -93,11 +115,15 @@ public class CommandGitService  {
         try (Repository repository = openRepository(username, repoName)) {
             response.setContentType("application/x-git-receive-pack-result");
             ReceivePack receivePack = new ReceivePack(repository);
-            receivePack.receive(request.getInputStream(), response.getOutputStream(), System.err);
+
+            // Stream only to response, avoid System.err
+            receivePack.receive(request.getInputStream(), response.getOutputStream(), response.getOutputStream());
+
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Error in handleReceivePack", e);
         }
     }
+
 
     // --- Utility: write Git packet line format ---
     private void writePacket(OutputStream out, String data) throws IOException {
@@ -110,6 +136,7 @@ public class CommandGitService  {
     }
 
     public String createToken(String user, String name, String scopes, Duration validity) {
+
         String rawToken = UUID.randomUUID().toString().replace("-", "");
         String hash = passwordEncoder.encode(rawToken); // uses Argon2
 
@@ -126,11 +153,14 @@ public class CommandGitService  {
         return rawToken; // only return once
     }
 
-    public boolean validate(User user, String rawToken) {
-        return user.getGitTokens().stream()
+    public boolean validate(String username, String rawToken) {
+        List<GitToken> tokens = repo.findByUsername(username);
+
+        return tokens.stream()
                 .anyMatch(t -> passwordEncoder.matches(rawToken, t.getTokenHash())
                         && (t.getExpiresAt() == null || t.getExpiresAt().isAfter(LocalDateTime.now())));
     }
+
 
 
 }
