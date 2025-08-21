@@ -189,6 +189,7 @@ public class AuthController {
             String authorizationUrl = baseUrl + "/oauth2/authorize/google";
 
             // Generate state for security (optional, Spring Security handles this)
+            // TODO => change the UUID.randomUUID().toString() with secure random to avoid cracking
             String state = UUID.randomUUID().toString();
 
             OAuthUrlResponse response = OAuthUrlResponse.builder()
