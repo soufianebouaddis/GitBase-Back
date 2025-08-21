@@ -2,11 +2,22 @@ package org.os.gitbase.git.service;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevTree;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.transport.ReceivePack;
+import org.eclipse.jgit.treewalk.TreeWalk;
+import org.os.gitbase.auth.entity.User;
+import org.os.gitbase.auth.repository.UserRepository;
+import org.os.gitbase.git.dto.FileTreeNode;
+import org.os.gitbase.git.dto.RepositoryInfo;
+import org.os.gitbase.git.dto.RepositoryTreeDto;
+import org.os.gitbase.git.entity.RepositoryGit;
 import org.os.gitbase.git.hook.CodeReviewHook;
+import org.os.gitbase.git.repository.GitRepositoryDB;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -15,7 +26,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 @Service
@@ -24,39 +38,43 @@ public class GitServiceImpl implements GitService {
     private final String repositoriesPath = "/var/gitbase/repositories";
     private static final Pattern VALID_REPO_NAME = Pattern.compile("^[a-zA-Z0-9._-]+$");
     private static final Pattern VALID_USERNAME = Pattern.compile("^[a-zA-Z0-9._-]+$");
+    private final GitRepositoryDB gitRepositoryDB;
+    private final UserRepository userRepository;
+    public GitServiceImpl(GitRepositoryDB gitRepositoryDB, UserRepository userRepository) {
+        this.gitRepositoryDB = gitRepositoryDB;
+        this.userRepository = userRepository;
+    }
 
-    public void createRepository(String username, String repoName, boolean isPrivate) {
-        // Validate inputs
-        validateUsername(username);
+    public void createRepository(String user, String repoName, boolean isPrivate) {
+        validateUsername(user);
         validateRepositoryName(repoName);
 
-        String repoPath = getRepositoryPath(username, repoName);
+        String repoPath = repositoriesPath + "/" + user + "/" + repoName + ".git";
 
         try {
-            // Create directory structure if it doesn't exist
             Path repoDir = Paths.get(repoPath);
             Files.createDirectories(repoDir.getParent());
 
-            Repository repo = FileRepositoryBuilder.create(new File(repoPath));
-            repo.create(true); // bare repository
+            org.eclipse.jgit.lib.Repository repo =
+                    FileRepositoryBuilder.create(new File(repoPath));
+            repo.create(true);
 
-            // Set repository configuration
             StoredConfig config = repo.getConfig();
             config.setBoolean("http", null, "receivepack", true);
             config.setBoolean("core", null, "bare", true);
-
-            // Set privacy configuration
-            if (isPrivate) {
-                config.setString("gitbase", null, "visibility", "private");
-            } else {
-                config.setString("gitbase", null, "visibility", "public");
-            }
-
+            config.setString("gitbase", null, "visibility", isPrivate ? "private" : "public");
             config.save();
             repo.close();
 
+            // ✅ Persist metadata in PostgreSQL
+            RepositoryGit entity = new RepositoryGit();
+            entity.setOwner(userRepository.findUserByName(user).get());
+            entity.setRepoName(repoName);
+            entity.setPrivate(isPrivate);
+            gitRepositoryDB.save(entity);
+
         } catch (IOException e) {
-            throw new RuntimeException("Failed to create repository: " + username + "/" + repoName, e);
+            throw new RuntimeException("Failed to create repository: " + user+ "/" + repoName, e);
         }
     }
 
@@ -152,33 +170,81 @@ public class GitServiceImpl implements GitService {
     /**
      * Lists all repositories for a given user
      *
-     * @param username the user whose repositories to list
      * @return array of repository names (without .git extension)
      */
-    public String[] listRepositories(String username) {
-        validateUsername(username);
+    public List<RepositoryTreeDto> listRepositories(String user) {
+        // Fetch from DB
+        List<RepositoryGit> repos = gitRepositoryDB.findByOwner(userRepository.findUserByName(user).get());
 
-        Path userPath = Paths.get(repositoriesPath, username);
-        File userDir = userPath.toFile();
+        List<RepositoryTreeDto> result = new ArrayList<>();
+        for (RepositoryGit repoEntity : repos) {
+            String repoPath = Paths.get(repositoriesPath, user, repoEntity.getRepoName() + ".git").toString();
 
-        if (!userDir.exists() || !userDir.isDirectory()) {
-            return new String[0];
+            try (Repository repo = new org.eclipse.jgit.storage.file.FileRepositoryBuilder()
+                    .setGitDir(new File(repoPath))
+                    .build()) {
+
+                // Get latest commit
+                try (Git git = new Git(repo)) {
+                    Iterable<RevCommit> commits = git.log().setMaxCount(1).call();
+                    RevCommit latestCommit = commits.iterator().hasNext() ? commits.iterator().next() : null;
+
+                    FileTreeNode root = null;
+                    if (latestCommit != null) {
+                        RevTree tree = latestCommit.getTree();
+                        root = buildFileTree(repo, tree);
+                    }
+
+                    RepositoryTreeDto dto = new RepositoryTreeDto();
+                    dto.setRepoName(repoEntity.getRepoName());
+                    dto.setPrivate(repoEntity.isPrivate());
+                    dto.setRoot(root);
+
+                    result.add(dto);
+                }
+
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to load repository tree for " + repoEntity.getRepoName(), e);
+            }
         }
+        return result;
+    }
 
-        File[] repos = userDir.listFiles(file ->
-                file.isDirectory() &&
-                        file.getName().endsWith(".git") &&
-                        new File(file, "HEAD").exists()
-        );
+    private FileTreeNode buildFileTree(Repository repo, RevTree tree) throws IOException {
+        FileTreeNode root = new FileTreeNode("/", true);
+        try (TreeWalk treeWalk = new TreeWalk(repo)) {
+            treeWalk.addTree(tree);
+            treeWalk.setRecursive(true);
 
-        if (repos == null) {
-            return new String[0];
+            while (treeWalk.next()) {
+                String path = treeWalk.getPathString();
+                addPathToTree(root, path);
+            }
         }
+        return root;
+    }
 
-        return Arrays.stream(repos)
-                .map(File::getName)
-                .map(name -> name.substring(0, name.length() - 4)) // Remove .git extension
-                .toArray(String[]::new);
+    private void addPathToTree(FileTreeNode root, String path) {
+        String[] parts = path.split("/");
+        FileTreeNode current = root;
+
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i];
+            boolean isDir = (i < parts.length - 1);
+
+            FileTreeNode child = current.getChildren()
+                    .stream()
+                    .filter(c -> c.getName().equals(part))
+                    .findFirst()
+                    .orElse(null);
+
+            if (child == null) {
+                child = new FileTreeNode(part, isDir);
+                current.getChildren().add(child);
+            }
+
+            current = child;
+        }
     }
 
     /**
@@ -215,22 +281,32 @@ public class GitServiceImpl implements GitService {
      * @return repository information object
      */
     public RepositoryInfo getRepositoryInfo(String username, String repoName) {
-        String repoPath = getValidatedRepositoryPath(username, repoName);
+        // ✅ Check from DB first
+        Optional<RepositoryGit> repoEntityOpt = gitRepositoryDB.findByOwnerNameAndRepoName(username, repoName);
+        RepositoryGit repoEntity = repoEntityOpt.orElseThrow(() ->
+                new RuntimeException("Repository not found: " + username + "/" + repoName));
+
+        String repoPath = Paths.get(repositoriesPath, username, repoName + ".git").toString();
 
         try (Repository repo = new FileRepositoryBuilder()
                 .setGitDir(new File(repoPath))
-                .readEnvironment()
-                .build()) {
+                .build();
+             Git git = new Git(repo)) {
 
-            StoredConfig config = repo.getConfig();
-            boolean isPrivate = "private".equals(config.getString("gitbase", null, "visibility"));
+            // ✅ Fetch last commit
+            Iterable<RevCommit> commits = git.log().setMaxCount(1).call();
+            long lastCommitTime = commits.iterator().hasNext()
+                    ? commits.iterator().next().getCommitTime() * 1000L
+                    : 0L;
 
-            File repoDir = new File(repoPath);
-            long lastModified = repoDir.lastModified();
+            return new RepositoryInfo(
+                    username,
+                    repoEntity.getRepoName(),
+                    repoEntity.isPrivate(),
+                    lastCommitTime
+            );
 
-            return new RepositoryInfo(username, repoName, isPrivate, lastModified);
-
-        } catch (IOException e) {
+        } catch (Exception e) {
             throw new RuntimeException("Failed to get repository info: " + username + "/" + repoName, e);
         }
     }
@@ -277,24 +353,4 @@ public class GitServiceImpl implements GitService {
                 .forEach(File::delete);
     }
 
-    // Inner class for repository information
-    public static class RepositoryInfo {
-        private final String username;
-        private final String repoName;
-        private final boolean isPrivate;
-        private final long lastModified;
-
-        public RepositoryInfo(String username, String repoName, boolean isPrivate, long lastModified) {
-            this.username = username;
-            this.repoName = repoName;
-            this.isPrivate = isPrivate;
-            this.lastModified = lastModified;
-        }
-
-        // Getters
-        public String getUsername() { return username; }
-        public String getRepoName() { return repoName; }
-        public boolean isPrivate() { return isPrivate; }
-        public long getLastModified() { return lastModified; }
-    }
 }

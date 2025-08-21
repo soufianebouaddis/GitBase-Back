@@ -15,4 +15,6 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     @Query("SELECT COUNT(u) FROM User u JOIN u.roles r WHERE r.roleName = 'CLIENT'")
     Optional<Long> countUsersWithClientRole();
+
+    Optional<User> findUserByName(String name);
 }

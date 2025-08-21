@@ -102,7 +102,7 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
             User user = userRepository.findUserByEmail(email).orElseGet(() -> {
                 User newUser = new User();
                 newUser.setEmail(email);
-                newUser.setName(name);
+                newUser.setName(removeAtSymbolAndFollowing(name));
                 newUser.setProfilePictureUrl(profilePictureUrl);
                 newUser.setAuthProvider(org.os.gitbase.auth.entity.enums.AuthProvider.GOOGLE);
                 newUser.setEmailVerified(true);
@@ -192,5 +192,12 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
 
     private void clearAuthenticationAttributes(HttpServletRequest request) {
         request.getSession().removeAttribute("SPRING_SECURITY_SAVED_REQUEST");
+    }
+
+    public static String removeAtSymbolAndFollowing(String email) {
+        if (email != null && email.contains("@")) {
+            return email.substring(0, email.indexOf('@'));
+        }
+        return email;
     }
 }

@@ -15,4 +15,11 @@ public class Constant {
     //GOOGLE OAUTH2 URLS
     public static final String OAUTH2_GOOGLE_URL_REQUEST = "/oauth2/google/url";
     public static final String GOOGLE_REQUEST = "/google";
+
+
+    // GIT URLS
+    public static final String GITBASE_MAPPING_REQUEST = "/api/v1/gitbase";
+    public static final String CREATE_REPOSITORY = "/api/v1/gitbase/create";
+    public static final String REPOSITORY_INFO = "/api/v1/gitbase/repo-info";
+    public static final String REPOSITORIES = "/api/v1/gitbase/repositories";
 }

@@ -297,9 +297,9 @@ public class AuthController {
             
             if (userInfo != null) {
                 return ResponseEntity.ok(new ApiResponseEntity<>(
-                        Instant.now(),
+                        null,
                         true,
-                        "User information retrieved successfully",
+                        null,
                         HttpStatus.OK,
                         userInfo
                 ));
