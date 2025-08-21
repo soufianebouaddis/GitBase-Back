@@ -1,7 +1,9 @@
 package org.os.gitbase.security;
 
 import jakarta.servlet.http.HttpServletResponse;
+import org.os.gitbase.auth.repository.UserRepository;
 import org.os.gitbase.constant.Constant;
+import org.os.gitbase.git.service.CommandGitService;
 import org.os.gitbase.google.OAuth2UserService;
 import org.os.gitbase.jwt.JwtTokenProvider;
 import org.os.gitbase.security.config.AuthenticationEntry;
@@ -11,6 +13,8 @@ import org.os.gitbase.security.config.SpaCsrfTokenRequestHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -32,6 +36,7 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.os.gitbase.auth.service.UserDetailService;
 
 import java.security.interfaces.RSAPublicKey;
+import java.util.List;
 
 @EnableWebSecurity
 @EnableMethodSecurity(prePostEnabled = true)
@@ -41,6 +46,7 @@ public class ApiSecurity {
     private final JwtAuthenticationFilter jwtFilter;
     private final UserDetailService userDetailsService;
     private final AuthenticationEntry authenticationEntry;
+    private final UserRepository userRepository;
     @Value("${jwt-keys.public_key}")
     private String public_key;
     private final String[] matchers = {
@@ -68,11 +74,12 @@ public class ApiSecurity {
 
     @Autowired
     public ApiSecurity(JwtTokenProvider jwtService, JwtAuthenticationFilter jwtFilter,
-                       UserDetailService userDetailsService, AuthenticationEntry authenticationEntry) {
+                       UserDetailService userDetailsService, AuthenticationEntry authenticationEntry, UserRepository userRepository) {
         this.jwtService = jwtService;
         this.jwtFilter = jwtFilter;
         this.userDetailsService = userDetailsService;
         this.authenticationEntry = authenticationEntry;
+        this.userRepository = userRepository;
     }
 
     @Bean
@@ -116,6 +123,8 @@ public class ApiSecurity {
                         .requestMatchers("/api/v1/auth/oauth2/google/url").permitAll())
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/api/v1/auth/oauth2/test").permitAll())
+                .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers("/api/v1/gitbase/**").authenticated())
                 .authorizeHttpRequests(
                         authorize -> authorize
                                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
@@ -160,7 +169,18 @@ public class ApiSecurity {
         final RSAPublicKey rsaPublicKey = (RSAPublicKey) this.jwtService.loadPublicKey(public_key);
         return NimbusJwtDecoder.withPublicKey(rsaPublicKey).build();
     }
+    @Bean
+    public AuthenticationManager authManager(CommandGitService tokenService) {
+        return authentication -> {
+            String username = authentication.getName();
+            String rawToken = authentication.getCredentials().toString();
 
+            if (tokenService.validate(userRepository.findUserByName(username).get(), rawToken)) {
+                return new UsernamePasswordAuthenticationToken(username, rawToken, List.of(() -> "GIT_USER"));
+            }
+            throw new BadCredentialsException("Invalid Git token");
+        };
+    }
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();

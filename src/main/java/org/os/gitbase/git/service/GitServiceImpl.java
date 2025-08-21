@@ -9,6 +9,8 @@ import org.eclipse.jgit.revwalk.RevTree;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.transport.ReceivePack;
+import org.eclipse.jgit.transport.RefAdvertiser;
+import org.eclipse.jgit.transport.UploadPack;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.os.gitbase.auth.entity.User;
 import org.os.gitbase.auth.repository.UserRepository;
@@ -23,6 +25,7 @@ import org.springframework.util.StringUtils;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -35,7 +38,7 @@ import java.util.regex.Pattern;
 @Service
 public class GitServiceImpl implements GitService {
 
-    private final String repositoriesPath = "/var/gitbase/repositories";
+    private final String repositoriesPath = "./gitbase/repositories";
     private static final Pattern VALID_REPO_NAME = Pattern.compile("^[a-zA-Z0-9._-]+$");
     private static final Pattern VALID_USERNAME = Pattern.compile("^[a-zA-Z0-9._-]+$");
     private final GitRepositoryDB gitRepositoryDB;
@@ -351,6 +354,73 @@ public class GitServiceImpl implements GitService {
                 .sorted(java.util.Comparator.reverseOrder())
                 .map(Path::toFile)
                 .forEach(File::delete);
+    }
+
+    public void handleUploadPack(String username, String repoName,
+                                 HttpServletRequest request,
+                                 HttpServletResponse response) {
+        validateUsername(username);
+        validateRepositoryName(repoName);
+
+        String repoPath = getRepositoryPath(username, repoName);
+
+        if (!repositoryExists(username, repoName)) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return;
+        }
+
+        try (Repository repo = new FileRepositoryBuilder()
+                .setGitDir(new File(repoPath))
+                .readEnvironment()
+                .build()) {
+
+            UploadPack uploadPack = new UploadPack(repo);
+            response.setContentType("application/x-git-upload-pack-result");
+            uploadPack.upload(request.getInputStream(), response.getOutputStream(), null);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Git upload-pack failed for " + username + "/" + repoName, e);
+        }
+    }
+
+    public void handleInfoRefs(String username, String repoName, String service, HttpServletResponse response) {
+        validateUsername(username);
+        validateRepositoryName(repoName);
+
+        String repoPath = getRepositoryPath(username, repoName);
+
+        if (!repositoryExists(username, repoName)) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return;
+        }
+
+        try (Repository repo = new FileRepositoryBuilder()
+                .setGitDir(new File(repoPath))
+                .readEnvironment()
+                .build();
+             OutputStream out = response.getOutputStream()) {
+
+            if ("git-upload-pack".equals(service)) {
+                response.setContentType("application/x-git-upload-pack-advertisement");
+
+                UploadPack uploadPack = new UploadPack(repo);
+                RefAdvertiser.PacketLineOutRefAdvertiser advertiser =
+                        new RefAdvertiser.PacketLineOutRefAdvertiser(new org.eclipse.jgit.transport.PacketLineOut(out));
+                uploadPack.sendAdvertisedRefs(advertiser);
+            } else if ("git-receive-pack".equals(service)) {
+                response.setContentType("application/x-git-receive-pack-advertisement");
+
+                ReceivePack rp = new ReceivePack(repo);
+                RefAdvertiser.PacketLineOutRefAdvertiser advertiser =
+                        new RefAdvertiser.PacketLineOutRefAdvertiser(new org.eclipse.jgit.transport.PacketLineOut(out));
+                rp.sendAdvertisedRefs(advertiser);
+            } else {
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to handle info/refs for " + username + "/" + repoName, e);
+        }
     }
 
 }

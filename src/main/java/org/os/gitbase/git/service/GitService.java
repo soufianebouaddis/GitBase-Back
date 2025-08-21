@@ -13,4 +13,8 @@ public interface GitService {
     RepositoryInfo getRepositoryInfo(String username, String repoName);
     List<RepositoryTreeDto> listRepositories(String user);
     void handleReceivePack(String username, String repoName, HttpServletRequest request, HttpServletResponse response);
+    void handleUploadPack(String username, String repoName,
+                                 HttpServletRequest request,
+                                 HttpServletResponse response);
+    void handleInfoRefs(String username, String repoName, String service, HttpServletResponse response);
 }

@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
+import org.os.gitbase.git.entity.GitToken;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import java.time.LocalDateTime;
@@ -78,6 +79,11 @@ public class User implements UserDetails {
     @Column(name = "password")
     private String password;
     private boolean isEnabled;
+
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<GitToken> gitTokens = new HashSet<>();
+
     public User() {}
 
     public User(String name, String email, String googleId, String profilePictureUrl) {

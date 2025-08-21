@@ -1,5 +1,7 @@
 package org.os.gitbase.git.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.os.gitbase.auth.service.UserService;
 import org.os.gitbase.git.dto.CreateRepositoryDto;
 import org.os.gitbase.git.dto.RepositoryInfo;
@@ -13,7 +15,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.os.gitbase.constant.Constant.*;
-
 @RequestMapping(GITBASE_MAPPING_REQUEST)
 @RestController
 public class GitController {
@@ -57,5 +58,36 @@ public class GitController {
     public ResponseEntity<?> listRepositories(@PathVariable String username) {
         List<?> repos = gitService.listRepositories(username);
         return ResponseEntity.ok(repos);
+    }
+
+
+    // --- Git advertises services (push/pull support) ---
+    @GetMapping("/info/refs")
+    public void getInfoRefs(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            @RequestParam(name = "service") String service,
+            HttpServletResponse response) {
+
+        gitService.handleInfoRefs(username, repoName, service, response);
+    }
+
+    @PostMapping("/git-receive-pack")
+    public void receivePack(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        gitService.handleReceivePack(username, repoName, request, response);
+    }
+
+    // --- Git fetch/clone endpoint ---
+    @PostMapping("/git-upload-pack")
+    public void uploadPack(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        gitService.handleUploadPack(username, repoName, request, response);
     }
 }
