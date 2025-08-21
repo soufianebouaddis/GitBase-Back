@@ -1,11 +1,9 @@
 package org.os.gitbase.git.controller;
 
 import org.os.gitbase.git.service.CommandGitService;
+import org.os.gitbase.helper.Helper;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
 import java.time.Duration;
@@ -25,12 +23,12 @@ public class GitTokenController {
     @PostMapping
     public ResponseEntity<Map<String, String>> createToken(
             Principal principal,
-            @RequestParam String name
+            @RequestBody String name
             //@RequestParam(defaultValue = "repo:read,repo:write") String scopes
     ) {
 
         String rawToken = tokenService.createToken(
-                principal.getName(),
+                Helper.removeAtSymbolAndFollowing(principal.getName()),
                 name,
                 "repo:read,repo:write",
                 Duration.ofDays(360) // expire in 360 days, like GitHub default
