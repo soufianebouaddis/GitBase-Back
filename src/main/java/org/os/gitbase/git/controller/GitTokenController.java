@@ -25,13 +25,14 @@ public class GitTokenController {
     @PostMapping
     public ResponseEntity<Map<String, String>> createToken(
             Principal principal,
-            @RequestParam String name,
-            @RequestParam(defaultValue = "repo:read,repo:write") String scopes) {
+            @RequestParam String name
+            //@RequestParam(defaultValue = "repo:read,repo:write") String scopes
+    ) {
 
         String rawToken = tokenService.createToken(
                 principal.getName(),
                 name,
-                scopes,
+                "repo:read,repo:write",
                 Duration.ofDays(360) // expire in 360 days, like GitHub default
         );
 
