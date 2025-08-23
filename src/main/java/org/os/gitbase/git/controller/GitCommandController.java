@@ -4,9 +4,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.os.gitbase.git.service.CommandGitService;
 import org.springframework.web.bind.annotation.*;
-
+/*
 @RestController
-@RequestMapping("/api/v1/gitbase/{username}/{repoName}.git")
+@RequestMapping("/api/v1/gitbase/{username}/{repoName}.git")*/
 public class GitCommandController {
 
     private final CommandGitService gitService;
@@ -15,8 +15,8 @@ public class GitCommandController {
         this.gitService = gitService;
     }
 
-    @GetMapping("/info/refs")
-    public void getInfoRefs(
+    //@GetMapping("/info/refs")
+    /*public void getInfoRefs(
             @PathVariable String username,
             @PathVariable String repoName,
             @RequestParam(name = "service") String service,
@@ -24,7 +24,7 @@ public class GitCommandController {
         gitService.handleInfoRefs(username, repoName, service, response);
     }
 
-    @PostMapping("/git-upload-pack")
+    //@PostMapping("/git-upload-pack")
     public void uploadPack(
             @PathVariable String username,
             @PathVariable String repoName,
@@ -33,12 +33,12 @@ public class GitCommandController {
         gitService.handleUploadPack(username, repoName, request, response);
     }
 
-    @PostMapping("/git-receive-pack")
+    //@PostMapping("/git-receive-pack")
     public void receivePack(
             @PathVariable String username,
             @PathVariable String repoName,
             HttpServletRequest request,
             HttpServletResponse response) {
         gitService.handleReceivePack(username, repoName, request, response);
-    }
+    }*/
 }

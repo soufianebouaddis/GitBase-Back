@@ -1,5 +1,6 @@
 package org.os.gitbase.security;
 
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import org.os.gitbase.auth.repository.UserRepository;
 import org.os.gitbase.constant.Constant;
@@ -12,6 +13,7 @@ import org.os.gitbase.security.config.OAuth2AuthenticationSuccessHandler;
 import org.os.gitbase.security.config.SpaCsrfTokenRequestHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -36,6 +38,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.os.gitbase.auth.service.UserDetailService;
+import org.springframework.web.filter.DelegatingFilterProxy;
 
 import java.security.interfaces.RSAPublicKey;
 import java.util.List;
@@ -62,8 +65,8 @@ public class ApiSecurity {
             "/api/v1/auth/oauth2/google/url",
             "/oauth2/**",
             "/login/oauth2/code/**",
-            "/api/v1/gitbase/create",
-            "/api/v1/git/tokens"
+            "/api/v1/web/gitbase/create",
+            "/api/v1/gitbase/tokens"
     };
 
     @Autowired
@@ -91,7 +94,7 @@ public class ApiSecurity {
                 .securityMatcher("/api/v1/gitbase/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authenticationManager(authManager) // ✅ explicitly use your bean
+                .authenticationManager(authManager)
                 .httpBasic(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
 
@@ -212,6 +215,8 @@ public class ApiSecurity {
                 1 << 12,
                 3);
     }
+
+
 
 
 

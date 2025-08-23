@@ -18,7 +18,7 @@ public class Constant {
 
 
     // GIT URLS
-    public static final String GITBASE_MAPPING_REQUEST = "/api/v1/gitbase";
+    public static final String GITBASE_MAPPING_REQUEST = "/api/v1/web/gitbase";
     public static final String CREATE_REPOSITORY = "/create";
     public static final String REPOSITORY_INFO = "/repo-info";
     public static final String REPOSITORIES = "/repositories";
