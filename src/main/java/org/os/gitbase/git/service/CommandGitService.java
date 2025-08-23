@@ -19,10 +19,12 @@ import org.os.gitbase.git.service.GitService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -50,8 +52,11 @@ public class CommandGitService  {
                 .findGitDir()
                 .build();
     }
+
+
+
     /**
-     * Handle Git info/refs requests - FIXED VERSION
+     * Handle Git info/refs requests (advertises refs for fetch/push)
      */
     public void handleInfoRefs(String username, String repoName, String service, HttpServletResponse response) {
         log.debug("Handling info/refs for {}/{} with service {}", username, repoName, service);
@@ -62,64 +67,54 @@ public class CommandGitService  {
                 return;
             }
 
-            // CRITICAL: Set proper headers before any output
+            // Required headers for Git Smart HTTP
             response.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
             response.setHeader("Pragma", "no-cache");
             response.setHeader("Expires", "Fri, 01 Jan 1980 00:00:00 GMT");
 
-            // Get output stream ONCE and reuse
-            OutputStream rawOut = response.getOutputStream();
-
-            if ("git-upload-pack".equals(service)) {
-                response.setContentType("application/x-git-upload-pack-advertisement");
-
-                // Create packet line writer
+            try (OutputStream rawOut = response.getOutputStream()) {
                 PacketLineOut packetOut = new PacketLineOut(rawOut);
 
-                // Write service advertisement
-                packetOut.writeString("# service=git-upload-pack\n");
-                packetOut.end(); // Send flush packet
+                if ("git-upload-pack".equals(service)) {
+                    response.setContentType("application/x-git-upload-pack-advertisement");
 
-                // Create and configure upload pack
-                UploadPack up = new UploadPack(repository);
+                    // Required prefix
+                    packetOut.writeString("# service=git-upload-pack\n");
+                    packetOut.end();
 
-                // Send refs advertisement
-                up.sendAdvertisedRefs(new RefAdvertiser.PacketLineOutRefAdvertiser(packetOut));
+                    UploadPack up = new UploadPack(repository);
+                    up.sendAdvertisedRefs(new RefAdvertiser.PacketLineOutRefAdvertiser(packetOut));
 
-            } else if ("git-receive-pack".equals(service)) {
-                response.setContentType("application/x-git-receive-pack-advertisement");
+                } else if ("git-receive-pack".equals(service)) {
+                    response.setContentType("application/x-git-receive-pack-advertisement");
 
-                // Create packet line writer
-                PacketLineOut packetOut = new PacketLineOut(rawOut);
+                    // Required prefix
+                    packetOut.writeString("# service=git-receive-pack\n");
+                    packetOut.end();
 
-                // Write service advertisement
-                packetOut.writeString("# service=git-receive-pack\n");
-                packetOut.end(); // Send flush packet
+                    ReceivePack rp = new ReceivePack(repository);
+                    rp.setCheckReceivedObjects(true);
+                    rp.setCheckReferencedObjectsAreReachable(true);
+                    rp.setAllowCreates(true);
+                    rp.setAllowDeletes(true);
+                    rp.setAllowNonFastForwards(true);
 
-                // Create and configure receive pack
-                ReceivePack rp = new ReceivePack(repository);
-                rp.setCheckReceivedObjects(true);
-                rp.setCheckReferencedObjectsAreReachable(true);
-                rp.setAllowCreates(true);
-                rp.setAllowDeletes(false);
-                rp.setAllowNonFastForwards(false);
+                    rp.sendAdvertisedRefs(new RefAdvertiser.PacketLineOutRefAdvertiser(packetOut));
 
-                // Send refs advertisement
-                rp.sendAdvertisedRefs(new RefAdvertiser.PacketLineOutRefAdvertiser(packetOut));
+                } else {
+                    log.warn("Unsupported service: {}", service);
+                    response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Unsupported service: " + service);
+                    return;
+                }
 
-            } else {
-                log.warn("Unsupported service: {}", service);
-                response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Unsupported service: " + service);
-                return;
+                rawOut.flush();
+                log.debug("Successfully sent advertisement for {}/{} service={}", username, repoName, service);
             }
 
-            // CRITICAL: Ensure all data is written
-            rawOut.flush();
-
-            log.debug("Successfully sent advertisement for {}/{} service={}", username, repoName, service);
-
+        } catch (AsyncRequestNotUsableException e) {
+            log.warn("Client disconnected during info/refs for {}/{}", username, repoName);
         } catch (IOException e) {
-            log.error("Error in handleInfoRefs for {}/{}: {}", username, repoName, e.getMessage(), e);
+            log.error("IO error in handleInfoRefs for {}/{}: {}", username, repoName, e.getMessage(), e);
             try {
                 if (!response.isCommitted()) {
                     response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Internal server error");
@@ -127,8 +122,11 @@ public class CommandGitService  {
             } catch (IOException ex) {
                 log.error("Failed to send error response", ex);
             }
+        } catch (Exception e) {
+            log.error("Unexpected error in handleInfoRefs for {}/{}: {}", username, repoName, e.getMessage(), e);
         }
     }
+
     /**
      * Handle upload-pack (fetch/clone)
      */
@@ -142,34 +140,22 @@ public class CommandGitService  {
                 return;
             }
 
-            // Set proper headers
             response.setContentType("application/x-git-upload-pack-result");
             response.setHeader("Cache-Control", "no-cache");
 
-            // Get streams
-            ServletInputStream in = request.getInputStream();
-            OutputStream out = response.getOutputStream();
+            try (ServletInputStream in = request.getInputStream();
+                 OutputStream out = response.getOutputStream()) {
 
-            // Create upload pack
-            UploadPack up = new UploadPack(repository);
+                UploadPack up = new UploadPack(repository);
+                up.upload(in, out, NullOutputStream.INSTANCE);
 
-            // CRITICAL FIX: Use NullOutputStream for error stream to prevent protocol confusion
-            up.upload(in, out, NullOutputStream.INSTANCE);
-
-            // Ensure all data is sent
-            out.flush();
+                out.flush();
+            }
 
             log.debug("Successfully completed upload-pack for {}/{}", username, repoName);
 
-        } catch (UploadPackInternalServerErrorException e) {
-            log.error("Internal server error in upload-pack for {}/{}: {}", username, repoName, e.getMessage(), e);
-            try {
-                if (!response.isCommitted()) {
-                    response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Upload pack internal error");
-                }
-            } catch (IOException ex) {
-                log.error("Failed to send error response", ex);
-            }
+        } catch (AsyncRequestNotUsableException e) {
+            log.warn("Client disconnected during upload-pack for {}/{}", username, repoName);
         } catch (IOException e) {
             log.error("IO error in upload-pack for {}/{}: {}", username, repoName, e.getMessage(), e);
             try {
@@ -179,8 +165,11 @@ public class CommandGitService  {
             } catch (IOException ex) {
                 log.error("Failed to send error response", ex);
             }
+        } catch (Exception e) {
+            log.error("Unexpected error in upload-pack for {}/{}: {}", username, repoName, e.getMessage(), e);
         }
     }
+
     /**
      * Handle receive-pack (push)
      */
@@ -194,62 +183,40 @@ public class CommandGitService  {
                 return;
             }
 
-            // Set proper headers
             response.setContentType("application/x-git-receive-pack-result");
             response.setHeader("Cache-Control", "no-cache");
 
-            // Get streams
-            ServletInputStream in = request.getInputStream();
-            OutputStream out = response.getOutputStream();
+            try (ServletInputStream in = request.getInputStream();
+                 OutputStream out = response.getOutputStream()) {
 
-            // Create receive pack with proper configuration
-            ReceivePack rp = new ReceivePack(repository);
-            rp.setCheckReceivedObjects(true);
-            rp.setCheckReferencedObjectsAreReachable(true);
-            rp.setAllowCreates(true);
-            rp.setAllowDeletes(false);
-            rp.setAllowNonFastForwards(false);
+                ReceivePack rp = new ReceivePack(repository);
+                rp.setCheckReceivedObjects(true);
+                rp.setCheckReferencedObjectsAreReachable(true);
+                rp.setAllowCreates(true);
+                rp.setAllowDeletes(true);
+                rp.setAllowNonFastForwards(true);
 
-            // Add basic logging hooks
-            rp.setPreReceiveHook(new PreReceiveHook() {
-                @Override
-                public void onPreReceive(ReceivePack receivePack, java.util.Collection<ReceiveCommand> commands) {
-                    log.debug("Pre-receive: Processing {} commands for {}/{}",
-                            commands.size(), username, repoName);
-                    for (ReceiveCommand cmd : commands) {
-                        log.debug("Command: {} {} -> {}",
-                                cmd.getRefName(),
-                                cmd.getOldId().name(),
-                                cmd.getNewId().name());
-                    }
-                }
-            });
+                // Hooks for logging
+                rp.setPreReceiveHook((receivePack, commands) -> {
+                    log.debug("Pre-receive: {} commands for {}/{}", commands.size(), username, repoName);
+                });
+                rp.setPostReceiveHook((receivePack, commands) -> {
+                    long ok = commands.stream().filter(c -> c.getResult() == ReceiveCommand.Result.OK).count();
+                    log.info("Post-receive: {} successful commands for {}/{}", ok, username, repoName);
+                });
 
-            rp.setPostReceiveHook(new PostReceiveHook() {
-                @Override
-                public void onPostReceive(ReceivePack receivePack, java.util.Collection<ReceiveCommand> commands) {
-                    long successCount = commands.stream()
-                            .mapToLong(cmd -> cmd.getResult() == ReceiveCommand.Result.OK ? 1 : 0)
-                            .sum();
-                    log.info("Post-receive: {} successful commands for {}/{}",
-                            successCount, username, repoName);
-                }
-            });
+                rp.receive(in, out, NullOutputStream.INSTANCE);
 
-            // CRITICAL FIX: This is the key fix for your "bad band #50" error
-            // Use NullOutputStream for error stream to prevent protocol confusion
-            rp.receive(in, out, NullOutputStream.INSTANCE);
-
-            // Ensure all data is sent
-            out.flush();
+                out.flush();
+            }
 
             log.debug("Successfully completed receive-pack for {}/{}", username, repoName);
 
+        } catch (AsyncRequestNotUsableException e) {
+            log.warn("Client disconnected during receive-pack for {}/{}", username, repoName);
         } catch (IOException e) {
-            log.error("Error in receive-pack for {}/{}: {}", username, repoName, e.getMessage(), e);
-            // NOTE: Don't try to send error response here if receive() has started
-            // The Git protocol may already be in progress and sending HTTP error would break it
-            // JGit's ReceivePack will handle sending appropriate Git protocol error messages
+            log.error("IO error in receive-pack for {}/{}: {}", username, repoName, e.getMessage(), e);
+            // don’t send errors here: Git client may already be mid-protocol
         } catch (Exception e) {
             log.error("Unexpected error in receive-pack for {}/{}: {}", username, repoName, e.getMessage(), e);
             try {
@@ -261,6 +228,12 @@ public class CommandGitService  {
             }
         }
     }
+
+
+
+
+
+
     public String createToken(String user, String name, String scopes, Duration validity) {
 
         String rawToken = UUID.randomUUID().toString().replace("-", "");

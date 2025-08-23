@@ -1,3 +1,10 @@
+server:
+  compression:
+    enabled: true
+    mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
+    excluded-user-agents: git, JGit
+    min-response-size: 1024
+
 spring:
   security:
     oauth2:

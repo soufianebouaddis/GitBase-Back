@@ -1,8 +1,6 @@
 package org.os.gitbase.security;
 
-import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
-import org.os.gitbase.auth.repository.UserRepository;
 import org.os.gitbase.constant.Constant;
 import org.os.gitbase.git.service.CommandGitService;
 import org.os.gitbase.google.OAuth2UserService;
@@ -38,7 +36,9 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.os.gitbase.auth.service.UserDetailService;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.web.filter.DelegatingFilterProxy;
+
 
 import java.security.interfaces.RSAPublicKey;
 import java.util.List;
@@ -100,7 +100,6 @@ public class ApiSecurity {
 
         return http.build();
     }
-
 
 
     @Bean
