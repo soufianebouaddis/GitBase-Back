@@ -5,18 +5,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.*;
-import org.eclipse.jgit.transport.resolver.ReceivePackFactory;
-import org.eclipse.jgit.transport.resolver.UploadPackFactory;
-import org.eclipse.jgit.storage.pack.PackConfig;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jgit.util.io.NullOutputStream;
-import org.os.gitbase.auth.entity.User;
 import org.os.gitbase.auth.repository.UserRepository;
+import org.os.gitbase.git.dto.GitTokenInfo;
 import org.os.gitbase.git.entity.GitToken;
+import org.os.gitbase.git.mapper.GitTokenMapper;
 import org.os.gitbase.git.repository.GitTokenRepository;
-import org.os.gitbase.git.service.GitService;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
@@ -30,18 +26,19 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
-import static org.eclipse.jgit.transport.BasePackPushConnection.*;
 @Service
 @Slf4j
 public class CommandGitService  {
     private final GitTokenRepository repo;
+    private final GitTokenMapper gitTokenMapper;
     private final PasswordEncoder passwordEncoder;
     private static final String BASE_PATH = "./gitbase/repositories"; // root path
     private final UserRepository userRepository;
-    public CommandGitService(GitTokenRepository repo, PasswordEncoder passwordEncoder, UserRepository userRepository) {
+    public CommandGitService(GitTokenRepository repo, PasswordEncoder passwordEncoder, UserRepository userRepository, GitTokenMapper gitTokenMapper) {
         this.repo = repo;
         this.passwordEncoder = passwordEncoder;
         this.userRepository = userRepository;
+        this.gitTokenMapper = gitTokenMapper;
     }
 
     private Repository openRepository(String username, String repoName) throws IOException {
@@ -260,7 +257,10 @@ public class CommandGitService  {
                         && (t.getExpiresAt() == null || t.getExpiresAt().isAfter(LocalDateTime.now())));
     }
 
-
+    public List<GitTokenInfo> getTokens(String username) {
+        List<GitToken> tokens = repo.findByUsername(username);
+        return gitTokenMapper.toDtoList(tokens);
+    }
 
 }
 
