@@ -156,7 +156,6 @@
 			<artifactId>org.eclipse.jgit.http.server</artifactId>
 			<version>7.3.0.202506031305-r</version>
 		</dependency>
-
 	</dependencies>
 
 	<build>

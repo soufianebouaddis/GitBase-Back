@@ -3,7 +3,11 @@ server:
     enabled: true
     mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
     excluded-user-agents: git, JGit
-    min-response-size: 1024
+    min-response-size: 2048
+  error:
+    whitelabel:
+      enabled: false
+    include-message: never
 
 spring:
   security:

@@ -65,7 +65,6 @@ public class User implements UserDetails {
     @Column(name = "account_locked")
     private Boolean accountLocked = false;
 
-
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
 

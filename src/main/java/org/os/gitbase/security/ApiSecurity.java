@@ -2,6 +2,7 @@ package org.os.gitbase.security;
 
 import jakarta.servlet.http.HttpServletResponse;
 import org.os.gitbase.constant.Constant;
+import org.os.gitbase.git.config.GitTokenAuthenticationProvider;
 import org.os.gitbase.git.service.CommandGitService;
 import org.os.gitbase.google.OAuth2UserService;
 import org.os.gitbase.jwt.JwtTokenProvider;
@@ -36,8 +37,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.os.gitbase.auth.service.UserDetailService;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
-import org.springframework.web.filter.DelegatingFilterProxy;
+
 
 
 import java.security.interfaces.RSAPublicKey;
@@ -78,6 +78,7 @@ public class ApiSecurity {
     @Autowired
     private OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
 
+
     @Autowired
     public ApiSecurity(JwtTokenProvider jwtService, JwtAuthenticationFilter jwtFilter,
                        UserDetailService userDetailsService, AuthenticationEntry authenticationEntry) {
@@ -89,14 +90,33 @@ public class ApiSecurity {
     }
     @Bean
     @Order(1)
-    public SecurityFilterChain gitSecurity(HttpSecurity http, AuthenticationManager authManager) throws Exception {
+    public SecurityFilterChain gitSecurity(HttpSecurity http,
+                                           GitTokenAuthenticationProvider gitTokenAuthenticationProvider) throws Exception {
+        System.out.println("=== Configuring Git Security Filter Chain ===");
+
         http
-                .securityMatcher("/api/v1/gitbase/**")
+                .securityMatcher(request -> {
+                    String uri = request.getRequestURI();
+                    boolean matches = uri.startsWith("/gitbase/");
+                    System.out.println("Security matcher check - URI: " + uri + ", Matches: " + matches);
+                    return matches;
+                })
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authenticationManager(authManager)
-                .httpBasic(Customizer.withDefaults())
-                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
+                .authenticationProvider(gitTokenAuthenticationProvider)
+                .httpBasic(httpBasic -> {
+                    httpBasic.authenticationEntryPoint((request, response, authException) -> {
+                        System.out.println("=== HTTP Basic Authentication Entry Point ===");
+                        System.out.println("Auth exception: " + authException.getMessage());
+                        System.out.println("Request URI: " + request.getRequestURI());
+                        response.setHeader("WWW-Authenticate", "Basic realm=\"Git Repository\"");
+                        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, authException.getMessage());
+                    });
+                })
+                .authorizeHttpRequests(auth -> {
+                    System.out.println("=== Configuring authorization rules ===");
+                    auth.anyRequest().authenticated();
+                });
 
         return http.build();
     }
@@ -104,7 +124,7 @@ public class ApiSecurity {
 
     @Bean
     @Order(2)
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, PasswordEncoder passwordEncoder) throws Exception {
         return http.cors(Customizer.withDefaults())
                 .csrf(csrf -> {
                     csrf
@@ -114,7 +134,7 @@ public class ApiSecurity {
                             .ignoringRequestMatchers(matchers);
                 }).addFilterBefore(new org.os.gitbase.security.config.CsrfFilter(), CsrfFilter.class)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
-                .authenticationProvider(authenticationProvider())
+                .authenticationProvider(authenticationProvider(passwordEncoder))
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(authenticationEntry))
                 .oauth2ResourceServer(authorize -> authorize.jwt(Customizer.withDefaults()))
                 .oauth2Login(oauth2 -> oauth2
@@ -177,9 +197,9 @@ public class ApiSecurity {
     }
 
     @Bean
-    public AuthenticationProvider authenticationProvider() {
+    public AuthenticationProvider authenticationProvider(PasswordEncoder passwordEncoder) {
         DaoAuthenticationProvider authenticationProvider = new DaoAuthenticationProvider(userDetailsService);
-        authenticationProvider.setPasswordEncoder(passwordEncoder());
+        authenticationProvider.setPasswordEncoder(passwordEncoder);
         return authenticationProvider;
     }
 
@@ -188,7 +208,8 @@ public class ApiSecurity {
         final RSAPublicKey rsaPublicKey = (RSAPublicKey) this.jwtService.loadPublicKey(public_key);
         return NimbusJwtDecoder.withPublicKey(rsaPublicKey).build();
     }
-    @Bean
+
+    /*
     public AuthenticationManager authManager(CommandGitService tokenService) {
         return authentication -> {
             String username = authentication.getName();
@@ -200,20 +221,12 @@ public class ApiSecurity {
             throw new BadCredentialsException("Invalid Git token");
         };
     }
+    */
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();
     }
 
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new Argon2PasswordEncoder(
-                16,
-                32,
-                1,
-                1 << 12,
-                3);
-    }
 
 
 
