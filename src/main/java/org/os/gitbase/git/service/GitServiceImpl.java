@@ -3,11 +3,11 @@ package org.os.gitbase.git.service;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.lib.*;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevTree;
+import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.RefAdvertiser;
 import org.eclipse.jgit.transport.UploadPack;
@@ -29,6 +29,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -74,6 +75,7 @@ public class GitServiceImpl implements GitService {
             entity.setOwner(userRepository.findUserByName(user).get());
             entity.setRepoName(repoName);
             entity.setPrivate(isPrivate);
+            entity.setCreatedAt(LocalDateTime.now());
             gitRepositoryDB.save(entity);
 
         } catch (IOException e) {
@@ -175,28 +177,74 @@ public class GitServiceImpl implements GitService {
      *
      * @return array of repository names (without .git extension)
      */
+    private void debugRepository(Repository repo, String repoName) throws IOException {
+        System.out.println("\n=== DEBUG: " + repoName + " ===");
+
+        // Check HEAD
+        Ref headRef = repo.exactRef(Constants.HEAD);
+        System.out.println("HEAD ref: " + headRef);
+        if (headRef != null) {
+            System.out.println("  isSymbolic: " + headRef.isSymbolic());
+            System.out.println("  target: " + headRef.getTarget());
+            if (headRef.getTarget() != null) {
+                System.out.println("  target objectId: " + headRef.getTarget().getObjectId());
+            }
+        }
+
+        // List all branches
+        System.out.println("\nBranches:");
+        List<Ref> branches = repo.getRefDatabase().getRefsByPrefix(Constants.R_HEADS);
+        for (Ref branch : branches) {
+            System.out.println("  " + branch.getName() + " -> " + branch.getObjectId());
+        }
+
+        // Try to read refs/heads/main directly from filesystem
+        File mainRef = new File(repo.getDirectory(), "refs/heads/main");
+        System.out.println("\nrefs/heads/main file exists: " + mainRef.exists());
+        if (mainRef.exists()) {
+            String content = new String(java.nio.file.Files.readAllBytes(mainRef.toPath())).trim();
+            System.out.println("  content: " + content);
+        }
+
+        // Check packed-refs
+        File packedRefs = new File(repo.getDirectory(), "packed-refs");
+        System.out.println("packed-refs exists: " + packedRefs.exists());
+        if (packedRefs.exists()) {
+            String content = new String(java.nio.file.Files.readAllBytes(packedRefs.toPath()));
+            System.out.println("  content:\n" + content);
+        }
+
+        System.out.println("=== END DEBUG ===\n");
+    }
+
     public List<RepositoryTreeDto> listRepositories(String user) {
-        // Fetch from DB
-        List<RepositoryGit> repos = gitRepositoryDB.findByOwner(userRepository.findUserByName(user).get());
+        List<RepositoryGit> repos = gitRepositoryDB.findByOwner(
+                userRepository.findUserByName(user).get()
+        );
 
         List<RepositoryTreeDto> result = new ArrayList<>();
+
         for (RepositoryGit repoEntity : repos) {
             String repoPath = Paths.get(repositoriesPath, user, repoEntity.getRepoName() + ".git").toString();
 
-            try (Repository repo = new org.eclipse.jgit.storage.file.FileRepositoryBuilder()
+            try (Repository repo = new FileRepositoryBuilder()
                     .setGitDir(new File(repoPath))
+                    .setBare()
                     .build()) {
 
-                // Get latest commit
-                try (Git git = new Git(repo)) {
-                    Iterable<RevCommit> commits = git.log().setMaxCount(1).call();
-                    RevCommit latestCommit = commits.iterator().hasNext() ? commits.iterator().next() : null;
+                ObjectId headId = resolveHead(repo); // Smart resolution with auto-fix
 
-                    FileTreeNode root = null;
-                    if (latestCommit != null) {
-                        RevTree tree = latestCommit.getTree();
-                        root = buildFileTree(repo, tree);
-                    }
+                if (headId == null) {
+                    System.out.println("⚠️ Repository " + repoEntity.getRepoName() + " is empty");
+                    result.add(new RepositoryTreeDto(repoEntity.getRepoName(), repoEntity.isPrivate(), null));
+                    continue;
+                }
+
+                try (RevWalk revWalk = new RevWalk(repo)) {
+                    RevCommit commit = revWalk.parseCommit(headId);
+                    RevTree tree = commit.getTree();
+
+                    FileTreeNode root = buildFileTree(repo, tree);
 
                     RepositoryTreeDto dto = new RepositoryTreeDto();
                     dto.setRepoName(repoEntity.getRepoName());
@@ -207,23 +255,78 @@ public class GitServiceImpl implements GitService {
                 }
 
             } catch (Exception e) {
-                throw new RuntimeException("Failed to load repository tree for " + repoEntity.getRepoName(), e);
+                System.err.println("❌ Failed to load repository: " + repoEntity.getRepoName());
+                e.printStackTrace();
+                result.add(new RepositoryTreeDto(repoEntity.getRepoName(), repoEntity.isPrivate(), null));
             }
         }
+
         return result;
     }
 
+    private ObjectId resolveHead(Repository repo) throws IOException {
+        repo.getRefDatabase().refresh();
+
+        // Try to resolve HEAD normally
+        Ref headRef = repo.exactRef(Constants.HEAD);
+        if (headRef != null && headRef.isSymbolic()) {
+            Ref target = headRef.getTarget();
+            if (target != null && target.getObjectId() != null) {
+                return target.getObjectId();
+            }
+        }
+
+        // HEAD is broken - find and use the actual default branch
+        List<String> preferredBranches = Arrays.asList(
+                "refs/heads/main",
+                "refs/heads/master",
+                "refs/heads/develop"
+        );
+
+        for (String branch : preferredBranches) {
+            ObjectId id = repo.resolve(branch);
+            if (id != null) {
+                updateHeadSilently(repo, branch);
+                return id;
+            }
+        }
+
+        // Use any available branch
+        List<Ref> branches = repo.getRefDatabase().getRefsByPrefix(Constants.R_HEADS);
+        if (!branches.isEmpty() && branches.get(0).getObjectId() != null) {
+            updateHeadSilently(repo, branches.get(0).getName());
+            return branches.get(0).getObjectId();
+        }
+
+        return null;
+    }
+
+    private void updateHeadSilently(Repository repo, String branchRef) {
+        try {
+            RefUpdate refUpdate = repo.updateRef(Constants.HEAD, true);
+            refUpdate.link(branchRef);
+        } catch (IOException e) {
+            // Fail silently
+        }
+    }
+
     private FileTreeNode buildFileTree(Repository repo, RevTree tree) throws IOException {
-        FileTreeNode root = new FileTreeNode("/", true);
+        FileTreeNode root = new FileTreeNode("root", true); // Changed from "/" to "root"
+
         try (TreeWalk treeWalk = new TreeWalk(repo)) {
             treeWalk.addTree(tree);
             treeWalk.setRecursive(true);
 
+            int fileCount = 0;
             while (treeWalk.next()) {
                 String path = treeWalk.getPathString();
                 addPathToTree(root, path);
+                fileCount++;
             }
+
+            System.out.println("📁 Processed " + fileCount + " files");
         }
+
         return root;
     }
 
