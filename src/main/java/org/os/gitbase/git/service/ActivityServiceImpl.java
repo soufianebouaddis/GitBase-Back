@@ -27,7 +27,7 @@ public class ActivityServiceImpl implements ActivityService {
     }
 
     @Override
-    public List<Activity> getRecentActivities() {
-        return activityRepository.findTop3ByOrderByTimestampDesc();
+    public List<Activity> getRecentActivities(String username) {
+        return activityRepository.findTop3ByActorOrderByTimestampDesc(username);
     }
 }

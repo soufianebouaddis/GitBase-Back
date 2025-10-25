@@ -7,5 +7,5 @@ import java.util.List;
 
 public interface ActivityService {
     void logActivity(ActivityType type, String actor, String target, String description);
-    List<Activity> getRecentActivities();
+    List<Activity> getRecentActivities(String username);
 }

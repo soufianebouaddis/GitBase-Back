@@ -12,4 +12,7 @@ import java.util.List;
 public interface GitTokenRepository extends JpaRepository<GitToken, Long> {
     @Query("SELECT t FROM GitToken t WHERE t.user.name = :username")
     List<GitToken> findByUsername(@Param("username") String username);
+
+    @Query("SELECT t FROM GitToken t WHERE t.user.email = :email")
+    List<GitToken> findByEmail(@Param("email") String email);
 }

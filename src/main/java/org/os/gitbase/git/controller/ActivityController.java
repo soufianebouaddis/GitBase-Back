@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.security.Principal;
 import java.util.List;
 
 import static org.os.gitbase.constant.Constant.ACTIVITIES_MAPPING_REQUEST;
@@ -24,7 +25,7 @@ public class ActivityController {
     }
 
     @GetMapping(RECENT_ACTIVITIES)
-    public ResponseEntity<List<Activity>> getRecentActivities() {
-        return ResponseEntity.ok(activityService.getRecentActivities());
+    public ResponseEntity<List<Activity>> getRecentActivities(Principal principal) {
+        return ResponseEntity.ok(activityService.getRecentActivities(principal.getName()));
     }
 }

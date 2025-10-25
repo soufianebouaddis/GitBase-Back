@@ -185,7 +185,7 @@ public class CommandGitService  {
         String hash = passwordEncoder.encode(rawToken); // uses Argon2
 
         GitToken entity = new GitToken();
-        entity.setUser(userRepository.findUserByName(user).get());
+        entity.setUser(userRepository.findUserByEmail(user).get());
         entity.setName(name);
         entity.setTokenHash(hash);
         entity.setScopes(scopes);
@@ -205,8 +205,8 @@ public class CommandGitService  {
                         && (t.getExpiresAt() == null || t.getExpiresAt().isAfter(LocalDateTime.now())));
     }
 
-    public List<GitTokenInfo> getTokens(String username) {
-        List<GitToken> tokens = repo.findByUsername(username);
+    public List<GitTokenInfo> getTokens(String email) {
+        List<GitToken> tokens = repo.findByEmail(email);
         return gitTokenMapper.toDtoList(tokens);
     }
 

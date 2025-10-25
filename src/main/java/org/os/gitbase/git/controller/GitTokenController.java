@@ -35,7 +35,7 @@ public class GitTokenController {
     ) {
 
         String rawToken = tokenService.createToken(
-                Helper.removeAtSymbolAndFollowing(principal.getName()),
+                principal.getName(),
                 createTokenDto.getName(),
                 createTokenDto.getScopes(),
                 Duration.ofDays(360) // expire in 360 days, like GitHub default
@@ -52,7 +52,7 @@ public class GitTokenController {
 
     @GetMapping
     public ResponseEntity<List<GitTokenInfo>> getTokens(Principal principal) {
-        List<GitTokenInfo> tokens = tokenService.getTokens(Helper.removeAtSymbolAndFollowing(principal.getName()));
+        List<GitTokenInfo> tokens = tokenService.getTokens(principal.getName());
 
         return ResponseEntity.ok(tokens);
     }

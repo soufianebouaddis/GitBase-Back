@@ -8,5 +8,5 @@ import java.util.List;
 
 @Repository
 public interface ActivityRepository extends JpaRepository<Activity, Long> {
-    List<Activity> findTop3ByOrderByTimestampDesc();
+    List<Activity> findTop3ByActorOrderByTimestampDesc(String actor);
 }
