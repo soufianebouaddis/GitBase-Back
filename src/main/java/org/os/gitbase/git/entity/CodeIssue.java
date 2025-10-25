@@ -1,5 +1,7 @@
 package org.os.gitbase.git.entity;
 
+import org.os.gitbase.git.entity.enums.IssueSeverity;
+
 public class CodeIssue {
     private String fileName;
     private int lineNumber;

@@ -2,6 +2,8 @@ package org.os.gitbase.git.controller;
 
 import org.os.gitbase.git.dto.CreateRepositoryDto;
 import org.os.gitbase.git.dto.RepositoryInfo;
+import org.os.gitbase.git.entity.enums.ActivityType;
+import org.os.gitbase.git.service.ActivityService;
 import org.os.gitbase.git.service.GitService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,9 +18,10 @@ import static org.os.gitbase.constant.Constant.*;
 @RestController
 public class GitController {
     private GitService gitService;
-
-    public GitController(GitService gitService) {
+    private ActivityService activityService;
+    public GitController(GitService gitService,ActivityService activityService) {
         this.gitService = gitService;
+        this.activityService = activityService;
     }
     @PostMapping(CREATE_REPOSITORY)
     public ResponseEntity<?> createRepository(@RequestBody CreateRepositoryDto request) {
@@ -39,6 +42,9 @@ public class GitController {
         response.put("message", "Repository created successfully");
         response.put("repository", request.getRepoName());
         response.put("gitCommands", gitCommands);
+
+        activityService.logActivity(ActivityType.REPO_CREATED,request.getUsername(),request.getRepoName(), "[ " + request.getRepoName() + " ] Repository created successfully" );
+
         return ResponseEntity.ok(response);
     }
 

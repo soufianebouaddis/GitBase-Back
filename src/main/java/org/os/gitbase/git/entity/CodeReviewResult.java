@@ -1,5 +1,7 @@
 package org.os.gitbase.git.entity;
 
+import org.os.gitbase.git.entity.enums.IssueSeverity;
+
 import java.util.ArrayList;
 import java.util.List;
 

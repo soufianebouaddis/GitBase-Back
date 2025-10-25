@@ -3,6 +3,8 @@ package org.os.gitbase.git.controller;
 import org.os.gitbase.constant.Constant;
 import org.os.gitbase.git.dto.CreateTokenDto;
 import org.os.gitbase.git.dto.GitTokenInfo;
+import org.os.gitbase.git.entity.enums.ActivityType;
+import org.os.gitbase.git.service.ActivityService;
 import org.os.gitbase.git.service.CommandGitService;
 import org.os.gitbase.helper.Helper;
 import org.springframework.http.ResponseEntity;
@@ -19,9 +21,11 @@ import java.util.Map;
 public class GitTokenController {
 
     private final CommandGitService tokenService;
+    private final ActivityService activityService;
 
-    public GitTokenController(CommandGitService tokenService) {
+    public GitTokenController(CommandGitService tokenService,ActivityService activityService) {
         this.tokenService = tokenService;
+        this.activityService = activityService;
     }
 
     @PostMapping
@@ -40,6 +44,9 @@ public class GitTokenController {
         Map<String, String> response = new HashMap<>();
         response.put("token", rawToken);
         response.put("note", "Save this token securely. It will not be shown again.");
+
+        activityService.logActivity(ActivityType.TOKEN_CREATED,principal.getName(),createTokenDto.getName(), "[ " + createTokenDto.getName() + " ] Token created successfully" );
+
         return ResponseEntity.ok(response);
     }
 

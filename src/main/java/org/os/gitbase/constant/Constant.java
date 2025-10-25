@@ -22,4 +22,8 @@ public class Constant {
     public static final String CREATE_REPOSITORY = "/create";
     public static final String REPOSITORY_INFO = "/repo-info";
     public static final String REPOSITORIES = "/repositories";
+
+    // ACTIVITIES
+    public static final String ACTIVITIES_MAPPING_REQUEST = "/api/v1/activities";
+    public static final String RECENT_ACTIVITIES = "/recent";
 }

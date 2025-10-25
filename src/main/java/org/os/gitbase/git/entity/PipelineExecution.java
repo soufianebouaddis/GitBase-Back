@@ -1,6 +1,7 @@
 package org.os.gitbase.git.entity;
 
 import jakarta.persistence.*;
+import org.os.gitbase.git.entity.enums.PipelineStatus;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;

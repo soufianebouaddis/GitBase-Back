@@ -1,4 +1,4 @@
-package org.os.gitbase.git.entity;
+package org.os.gitbase.git.entity.enums;
 
 public enum IssueSeverity {
     LOW,
