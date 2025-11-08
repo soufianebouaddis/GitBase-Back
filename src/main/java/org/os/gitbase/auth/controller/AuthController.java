@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 
 import lombok.extern.slf4j.Slf4j;
 import org.os.gitbase.auth.dto.*;
+import org.os.gitbase.auth.entity.Role;
 import org.os.gitbase.auth.entity.User;
 import org.os.gitbase.auth.entity.jwt.RefreshToken;
 import org.os.gitbase.auth.service.UserService;
@@ -14,6 +15,7 @@ import org.os.gitbase.constant.Constant;
 
 import org.os.gitbase.google.GoogleTokenVerifier;
 import org.os.gitbase.google.GoogleUserInfo;
+import org.os.gitbase.helper.Helper;
 import org.os.gitbase.jwt.JwtTokenProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -90,7 +92,8 @@ public class AuthController {
 
             // Create new user
             User newUser = new User();
-            newUser.setName(registerDTO.getName());
+            newUser.setName(Helper.removeAtSymbolAndFollowing(registerDTO.getEmail()));
+            newUser.setFullName(registerDTO.getFullName());
             newUser.setEmail(registerDTO.getEmail());
             newUser.setPassword(passwordEncoder.encode(registerDTO.getPassword()));
             newUser.setAuthProvider(org.os.gitbase.auth.entity.enums.AuthProvider.LOCAL);
@@ -232,7 +235,7 @@ public class AuthController {
                 
                 if (userInfo != null) {
                     String accessToken = jwtTokenProvider.generateToken(googleUserInfo.getEmail(), userInfo.getRoles().stream()
-                            .map(role -> role.getRoleName())
+                            .map(Role::getRoleName)
                             .toList());
                     RefreshToken refreshTokenEntity = jwtTokenProvider.createRefreshToken(googleUserInfo.getEmail());
                     

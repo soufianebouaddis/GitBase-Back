@@ -17,4 +17,6 @@ public class RegisterDTO {
     String password;
     @NotNull(message = "name cannot be null")
     String name;
+    @NotNull(message = "fullName cannot be null")
+    String fullName;
 }

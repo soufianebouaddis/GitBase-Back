@@ -15,6 +15,7 @@ import org.os.gitbase.auth.entity.Role;
 public class UserInfo {
     UUID id;
     String name;
+    String fullName;
     String email;
     String profilePictureUrl;
     Set<Role> roles;

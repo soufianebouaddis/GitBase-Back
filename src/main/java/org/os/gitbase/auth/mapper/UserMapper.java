@@ -17,6 +17,7 @@ public interface UserMapper {
     @Mappings({
             @Mapping(target = "id",source="id"),
             @Mapping(target = "name",source = "name"),
+            @Mapping(target = "fullName",source = "fullName"),
             @Mapping(target = "email",source = "email"),
             @Mapping(target = "profilePictureUrl",source = "profilePictureUrl"),
     })

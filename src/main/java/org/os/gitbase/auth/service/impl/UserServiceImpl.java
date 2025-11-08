@@ -12,6 +12,7 @@ import org.os.gitbase.auth.repository.UserRepository;
 import org.os.gitbase.auth.service.UserDetailService;
 import org.os.gitbase.auth.service.UserService;
 import org.os.gitbase.constant.Constant;
+import org.os.gitbase.helper.Helper;
 import org.os.gitbase.jwt.JwtTokenProvider;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Service;
@@ -173,6 +174,7 @@ public class UserServiceImpl implements UserService {
                     user.setProfilePictureUrl(filename);
                 }
             }
+            user.setFullName(Helper.removeAtSymbolAndFollowing(user.getEmail()));
             user.setLastLogin(LocalDateTime.now());
             userRepository.save(user);
             List<String> roles = user.getRoles().stream().map(Role::getRoleName).toList();

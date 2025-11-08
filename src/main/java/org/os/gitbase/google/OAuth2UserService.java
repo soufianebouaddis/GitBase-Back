@@ -64,6 +64,7 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
         try {
             User user = new User(
                     oAuth2UserInfo.getName(),
+                    oAuth2UserInfo.getName(),
                     oAuth2UserInfo.getEmail(),
                     oAuth2UserInfo.getId(),
                     oAuth2UserInfo.getImageUrl()

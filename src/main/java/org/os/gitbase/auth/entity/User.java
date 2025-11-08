@@ -40,6 +40,9 @@ public class User implements UserDetails {
     @Size(max = 255)
     private String name;
 
+    @Size(max = 255)
+    private String fullName;
+
     @NotBlank
     @Email
     @Size(max = 255)
@@ -85,7 +88,8 @@ public class User implements UserDetails {
 
     public User() {}
 
-    public User(String name, String email, String googleId, String profilePictureUrl) {
+    public User(String fullName,String name, String email, String googleId, String profilePictureUrl) {
+        this.fullName = fullName;
         this.name = name;
         this.email = email;
         this.googleId = googleId;

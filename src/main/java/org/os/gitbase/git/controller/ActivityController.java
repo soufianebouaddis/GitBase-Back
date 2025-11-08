@@ -3,6 +3,7 @@ package org.os.gitbase.git.controller;
 import lombok.RequiredArgsConstructor;
 import org.os.gitbase.git.entity.Activity;
 import org.os.gitbase.git.service.ActivityService;
+import org.os.gitbase.helper.Helper;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,6 +27,6 @@ public class ActivityController {
 
     @GetMapping(RECENT_ACTIVITIES)
     public ResponseEntity<List<Activity>> getRecentActivities(Principal principal) {
-        return ResponseEntity.ok(activityService.getRecentActivities(principal.getName()));
+        return ResponseEntity.ok(activityService.getRecentActivities(Helper.removeAtSymbolAndFollowing(principal.getName())));
     }
 }
