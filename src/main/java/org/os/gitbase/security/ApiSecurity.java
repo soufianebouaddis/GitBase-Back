@@ -6,10 +6,7 @@ import org.os.gitbase.git.config.GitTokenAuthenticationProvider;
 import org.os.gitbase.git.service.CommandGitService;
 import org.os.gitbase.google.OAuth2UserService;
 import org.os.gitbase.jwt.JwtTokenProvider;
-import org.os.gitbase.security.config.AuthenticationEntry;
-import org.os.gitbase.security.config.OAuth2AuthenticationFailureHandler;
-import org.os.gitbase.security.config.OAuth2AuthenticationSuccessHandler;
-import org.os.gitbase.security.config.SpaCsrfTokenRequestHandler;
+import org.os.gitbase.security.config.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -139,7 +136,9 @@ public class ApiSecurity {
                 .oauth2ResourceServer(authorize -> authorize.jwt(Customizer.withDefaults()))
                 .oauth2Login(oauth2 -> oauth2
                         .authorizationEndpoint(authorization -> authorization
-                                .baseUri("/oauth2/authorize"))
+                                .baseUri("/oauth2/authorize")
+                                .authorizationRequestRepository(cookieAuthorizationRequestRepository())
+                        )
                         .redirectionEndpoint(redirection -> redirection
                                 .baseUri("/login/oauth2/code/*"))
                         .userInfoEndpoint(userInfo -> userInfo
@@ -228,6 +227,10 @@ public class ApiSecurity {
     }
 
 
+    @Bean
+    public HttpCookieOAuth2AuthorizationRequestRepository cookieAuthorizationRequestRepository() {
+        return new HttpCookieOAuth2AuthorizationRequestRepository();
+    }
 
 
 

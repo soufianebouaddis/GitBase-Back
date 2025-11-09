@@ -21,7 +21,7 @@ public class OAuth2AuthenticationFailureHandler extends SimpleUrlAuthenticationF
 
     private static final Logger logger = LoggerFactory.getLogger(OAuth2AuthenticationFailureHandler.class);
 
-    @Value("${app.oauth2.authorized-redirect-uri:http://localhost:5173/oauth2/redirect}")
+    @Value("${app.oauth2.failure-redirect-uri}")
     private String authorizedRedirectUri;
 
     @Override
@@ -75,7 +75,7 @@ public class OAuth2AuthenticationFailureHandler extends SimpleUrlAuthenticationF
 
         String encodedErrorMessage = URLEncoder.encode(errorMessage, StandardCharsets.UTF_8);
 
-        return UriComponentsBuilder.fromUriString(authorizedRedirectUri)
+        return UriComponentsBuilder.fromUriString("http://localhost:5173/login")
                 .queryParam("error", errorType)
                 .queryParam("message", encodedErrorMessage)
                 .build().toUriString();

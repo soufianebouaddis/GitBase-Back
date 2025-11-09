@@ -63,7 +63,7 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
     private User registerNewUser(GoogleOAuth2UserInfo oAuth2UserInfo) {
         try {
             User user = new User(
-                    oAuth2UserInfo.getName(),
+                    oAuth2UserInfo.getName(),// this one is mirror of FullName in user entity (this comment just a hint)
                     oAuth2UserInfo.getName(),
                     oAuth2UserInfo.getEmail(),
                     oAuth2UserInfo.getId(),

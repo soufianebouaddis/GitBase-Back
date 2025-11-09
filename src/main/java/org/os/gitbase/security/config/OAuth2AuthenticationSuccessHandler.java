@@ -9,26 +9,33 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.os.gitbase.auth.dto.AuthResponse;
 import org.os.gitbase.auth.dto.UserInfo;
+import org.os.gitbase.auth.entity.Role;
 import org.os.gitbase.auth.entity.User;
+import org.os.gitbase.auth.entity.enums.AuthProvider;
 import org.os.gitbase.auth.entity.jwt.RefreshToken;
 import org.os.gitbase.auth.mapper.UserMapper;
+import org.os.gitbase.auth.repository.RoleRepository;
 import org.os.gitbase.auth.repository.UserRepository;
 import org.os.gitbase.common.ApiResponseEntity;
 import org.os.gitbase.google.UserPrincipal;
 import org.os.gitbase.helper.Helper;
 import org.os.gitbase.jwt.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
 import org.os.gitbase.constant.Constant;
 import java.io.IOException;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -45,13 +52,17 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
     
     @Autowired
     private UserMapper userMapper;
-
+    @Qualifier("httpCookieOAuth2AuthorizationRequestRepository")
     @Autowired
-    private org.os.gitbase.auth.repository.RoleRepository roleRepository;
+    private HttpCookieOAuth2AuthorizationRequestRepository authorizationRequestRepository;
+    @Autowired
+    private RoleRepository roleRepository;
     @Value("${app.oauth2.frontend-redirect-uri}")
     private String frontendRedirectUri;
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new JavaTimeModule());
+
+
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
@@ -68,7 +79,7 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
             String profilePictureUrl;
             List<String> roles;
 
-            if (authentication.getPrincipal() instanceof org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser oidcUser) {
+            if (authentication.getPrincipal() instanceof DefaultOidcUser oidcUser) {
                 email = oidcUser.getEmail();
                 name = oidcUser.getName();
                 profilePictureUrl = oidcUser.getPicture();
@@ -105,14 +116,14 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
                 newUser.setEmail(email);
                 newUser.setName(Helper.removeAtSymbolAndFollowing(name));
                 newUser.setProfilePictureUrl(profilePictureUrl);
-                newUser.setAuthProvider(org.os.gitbase.auth.entity.enums.AuthProvider.GOOGLE);
+                newUser.setAuthProvider(AuthProvider.GOOGLE);
                 newUser.setEmailVerified(true);
                 newUser.setEnabled(true);
-                newUser.setLastLogin(java.time.LocalDateTime.now());
+                newUser.setLastLogin(LocalDateTime.now());
                 // Assign default role
-                org.os.gitbase.auth.entity.Role userRole = roleRepository.findRoleByRoleName("ROLE_USER")
+                Role userRole = roleRepository.findRoleByRoleName("ROLE_USER")
                     .orElseThrow(() -> new RuntimeException("Default USER role not found."));
-                java.util.HashSet<org.os.gitbase.auth.entity.Role> rolesSet = new java.util.HashSet<>();
+                HashSet<Role> rolesSet = new HashSet<>();
                 rolesSet.add(userRole);
                 newUser.setRoles(rolesSet);
                 return userRepository.save(newUser);
@@ -166,6 +177,7 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
 
 
             log.info("OAuth2 login successful for user: {} with ID: {}", email, user.getId());
+            authorizationRequestRepository.removeAuthorizationRequestCookies(request, response);
 
             // Clear authentication attributes
             clearAuthenticationAttributes(request);

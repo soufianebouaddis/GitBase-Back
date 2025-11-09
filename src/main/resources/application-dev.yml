@@ -40,7 +40,7 @@ spring:
 #    clean-disabled: false
 app:
   oauth2:
-    authorized-redirect-uri: http://localhost:5173/oauth2/callback
+    failure-redirect-uri: http://localhost:5173/login
     frontend-redirect-uri: http://localhost:5173/dashboard
 
 
