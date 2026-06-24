@@ -1,65 +1,140 @@
 package org.os.gitbase.git.controller;
 
+import jakarta.validation.Valid;
+import org.os.gitbase.common.ApiResponseEntity;
+import org.os.gitbase.exception.AccessDeniedDomainException;
 import org.os.gitbase.git.dto.CreateRepositoryDto;
+import org.os.gitbase.git.dto.DirectoryListingDto;
+import org.os.gitbase.git.dto.FileContentDto;
+import org.os.gitbase.git.dto.FileTreeNode;
 import org.os.gitbase.git.dto.RepositoryInfo;
+import org.os.gitbase.git.dto.RepositoryTreeDto;
 import org.os.gitbase.git.entity.enums.ActivityType;
 import org.os.gitbase.git.service.ActivityService;
 import org.os.gitbase.git.service.GitService;
+import org.os.gitbase.helper.Helper;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.Principal;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.os.gitbase.constant.Constant.*;
+
 @RequestMapping(GITBASE_MAPPING_REQUEST)
 @RestController
 public class GitController {
-    private GitService gitService;
-    private ActivityService activityService;
-    public GitController(GitService gitService,ActivityService activityService) {
+
+    private final GitService gitService;
+    private final ActivityService activityService;
+
+    public GitController(GitService gitService, ActivityService activityService) {
         this.gitService = gitService;
         this.activityService = activityService;
     }
+
+    // -------------------- CREATE REPOSITORY --------------------
     @PostMapping(CREATE_REPOSITORY)
-    public ResponseEntity<?> createRepository(@RequestBody CreateRepositoryDto request) {
-        gitService.createRepository(request.getUsername(),
-                request.getRepoName(),
-                request.isPrivate());
-        String remoteUrl = "http://localhost:8880/api/v1/gitbase/" + request.getUsername() + "/" + request.getRepoName() + ".git";
+    public ResponseEntity<ApiResponseEntity<Map<String, Object>>> createRepository(
+            @Valid @RequestBody CreateRepositoryDto request) {
+
+        gitService.createRepository(request.getUsername(), request.getRepoName(), request.isPrivate());
+
+        String branch = (request.getDefaultBranch() == null || request.getDefaultBranch().isEmpty())
+                ? "main" : request.getDefaultBranch();
+        String remoteUrl = "http://localhost:8880/api/v1/gitbase/"
+                + request.getUsername() + "/" + request.getRepoName() + ".git";
+
         List<String> gitCommands = Arrays.asList(
                 "git init",
                 "git add .",
-                "git branch -M " + (request.getDefaultBranch().isEmpty() ? "main" : request.getDefaultBranch()),
+                "git branch -M " + branch,
                 "git commit -m \"first commit\"",
                 "git remote add origin " + remoteUrl,
-                "git push -u origin " + (request.getDefaultBranch().isEmpty() ? "main" : request.getDefaultBranch())
+                "git push -u origin " + branch
         );
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("message", "Repository created successfully");
-        response.put("repository", request.getRepoName());
-        response.put("gitCommands", gitCommands);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("repository", request.getRepoName());
+        data.put("remoteUrl", remoteUrl);
+        data.put("gitCommands", gitCommands);
 
-        activityService.logActivity(ActivityType.REPO_CREATED,request.getUsername(),request.getRepoName(), "[ " + request.getRepoName() + " ] Repository created successfully" );
+        activityService.logActivity(ActivityType.REPO_CREATED, request.getUsername(), request.getRepoName(),
+                "[ " + request.getRepoName() + " ] Repository created successfully");
 
-        return ResponseEntity.ok(response);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponseEntity.created(data, "Repository created successfully"));
     }
 
     // -------------------- GET REPOSITORY INFO --------------------
     @GetMapping(REPOSITORY_INFO)
-    public ResponseEntity<RepositoryInfo> getRepositoryInfo(@RequestParam String username,
-                                                            @RequestParam String repoName) {
+    public ResponseEntity<ApiResponseEntity<RepositoryInfo>> getRepositoryInfo(
+            @RequestParam String username,
+            @RequestParam String repoName) {
         RepositoryInfo info = gitService.getRepositoryInfo(username, repoName);
-        return ResponseEntity.ok(info);
+        return ResponseEntity.ok(ApiResponseEntity.ok(info, "Repository info retrieved"));
     }
 
     // -------------------- LIST ALL USER REPOSITORIES --------------------
-    @GetMapping(REPOSITORIES+"/{username}")
-    public ResponseEntity<?> listRepositories(@PathVariable String username) {
-        List<?> repos = gitService.listRepositories(username);
-        return ResponseEntity.ok(repos);
+    @GetMapping(REPOSITORIES + "/{username}")
+    public ResponseEntity<ApiResponseEntity<List<RepositoryTreeDto>>> listRepositories(
+            @PathVariable String username) {
+        List<RepositoryTreeDto> repos = gitService.listRepositories(username);
+        return ResponseEntity.ok(ApiResponseEntity.ok(repos, "Repositories retrieved"));
+    }
+
+    // -------------------- BROWSE FILE TREE --------------------
+    @GetMapping("/{username}/{repoName}/tree")
+    public ResponseEntity<ApiResponseEntity<FileTreeNode>> getTree(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            @RequestParam(required = false) String ref) {
+        FileTreeNode tree = gitService.getTree(username, repoName, ref);
+        return ResponseEntity.ok(ApiResponseEntity.ok(tree, "File tree retrieved"));
+    }
+
+    // -------------------- BROWSE DIRECTORY (GitHub-style listing) --------------------
+    @GetMapping("/{username}/{repoName}/contents")
+    public ResponseEntity<ApiResponseEntity<DirectoryListingDto>> listContents(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            @RequestParam(required = false) String ref,
+            @RequestParam(required = false, defaultValue = "") String path) {
+        DirectoryListingDto listing = gitService.listContents(username, repoName, ref, path);
+        return ResponseEntity.ok(ApiResponseEntity.ok(listing, "Directory listing retrieved"));
+    }
+
+    // -------------------- VIEW FILE CONTENT --------------------
+    @GetMapping("/{username}/{repoName}/blob")
+    public ResponseEntity<ApiResponseEntity<FileContentDto>> getFileContent(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            @RequestParam(required = false) String ref,
+            @RequestParam String path) {
+        FileContentDto file = gitService.getFileContent(username, repoName, ref, path);
+        return ResponseEntity.ok(ApiResponseEntity.ok(file, "File content retrieved"));
+    }
+
+    // -------------------- DELETE REPOSITORY --------------------
+    @DeleteMapping("/{username}/{repoName}")
+    public ResponseEntity<ApiResponseEntity<Void>> deleteRepository(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            Principal principal) {
+
+        String authUser = Helper.removeAtSymbolAndFollowing(principal.getName());
+        if (!authUser.equals(username)) {
+            throw new AccessDeniedDomainException("You can only delete your own repositories");
+        }
+
+        gitService.deleteRepository(authUser, repoName);
+        activityService.logActivity(ActivityType.REPO_DELETED, authUser, repoName,
+                "[ " + repoName + " ] Repository deleted");
+
+        return ResponseEntity.ok(ApiResponseEntity.message("Repository deleted", HttpStatus.OK));
     }
 }

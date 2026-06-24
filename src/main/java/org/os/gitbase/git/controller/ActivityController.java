@@ -1,6 +1,6 @@
 package org.os.gitbase.git.controller;
 
-import lombok.RequiredArgsConstructor;
+import org.os.gitbase.common.ApiResponseEntity;
 import org.os.gitbase.git.entity.Activity;
 import org.os.gitbase.git.service.ActivityService;
 import org.os.gitbase.helper.Helper;
@@ -26,7 +26,9 @@ public class ActivityController {
     }
 
     @GetMapping(RECENT_ACTIVITIES)
-    public ResponseEntity<List<Activity>> getRecentActivities(Principal principal) {
-        return ResponseEntity.ok(activityService.getRecentActivities(Helper.removeAtSymbolAndFollowing(principal.getName())));
+    public ResponseEntity<ApiResponseEntity<List<Activity>>> getRecentActivities(Principal principal) {
+        List<Activity> activities = activityService.getRecentActivities(
+                Helper.removeAtSymbolAndFollowing(principal.getName()));
+        return ResponseEntity.ok(ApiResponseEntity.ok(activities, "Recent activities retrieved"));
     }
 }

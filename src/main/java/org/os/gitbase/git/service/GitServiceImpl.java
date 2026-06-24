@@ -3,6 +3,7 @@ package org.os.gitbase.git.service;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.*;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevTree;
@@ -14,24 +15,31 @@ import org.eclipse.jgit.transport.UploadPack;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.os.gitbase.auth.entity.User;
 import org.os.gitbase.auth.repository.UserRepository;
+import org.os.gitbase.git.dto.CommitSummaryDto;
+import org.os.gitbase.git.dto.DirEntryDto;
+import org.os.gitbase.git.dto.DirectoryListingDto;
+import org.os.gitbase.git.dto.FileContentDto;
 import org.os.gitbase.git.dto.FileTreeNode;
 import org.os.gitbase.git.dto.RepositoryInfo;
 import org.os.gitbase.git.dto.RepositoryTreeDto;
 import org.os.gitbase.git.entity.RepositoryGit;
 import org.os.gitbase.git.hook.CodeReviewHook;
 import org.os.gitbase.git.repository.GitRepositoryDB;
+import org.os.gitbase.exception.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -354,28 +362,31 @@ public class GitServiceImpl implements GitService {
     }
 
     /**
-     * Deletes a repository from the filesystem
+     * Deletes a repository: removes the PostgreSQL metadata row first, then the bare
+     * repository directory on disk. Throws {@link ResourceNotFoundException} if no
+     * repository exists for the given owner/name.
      *
      * @param username the repository owner's username
      * @param repoName the repository name
-     * @return true if deletion was successful, false otherwise
      */
-    public boolean deleteRepository(String username, String repoName) {
+    @Override
+    public void deleteRepository(String username, String repoName) {
         validateUsername(username);
         validateRepositoryName(repoName);
 
-        if (!repositoryExists(username, repoName)) {
-            return false;
-        }
+        RepositoryGit entity = gitRepositoryDB.findByOwnerNameAndRepoName(username, repoName)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Repository not found: " + username + "/" + repoName));
+
+        // Remove metadata first so the repo disappears from listings even if the
+        // filesystem delete partially fails.
+        gitRepositoryDB.delete(entity);
 
         String repoPath = getRepositoryPath(username, repoName);
-
         try {
-            Path repoDir = Paths.get(repoPath);
-            deleteDirectory(repoDir);
-            return true;
+            deleteDirectory(Paths.get(repoPath));
         } catch (IOException e) {
-            throw new RuntimeException("Failed to delete repository: " + username + "/" + repoName, e);
+            throw new RuntimeException("Failed to delete repository files: " + username + "/" + repoName, e);
         }
     }
 
@@ -390,7 +401,7 @@ public class GitServiceImpl implements GitService {
         // ✅ Check from DB first
         Optional<RepositoryGit> repoEntityOpt = gitRepositoryDB.findByOwnerNameAndRepoName(username, repoName);
         RepositoryGit repoEntity = repoEntityOpt.orElseThrow(() ->
-                new RuntimeException("Repository not found: " + username + "/" + repoName));
+                new ResourceNotFoundException("Repository not found: " + username + "/" + repoName));
 
         String repoPath = Paths.get(repositoriesPath, username, repoName + ".git").toString();
 
@@ -415,6 +426,205 @@ public class GitServiceImpl implements GitService {
         } catch (Exception e) {
             throw new RuntimeException("Failed to get repository info: " + username + "/" + repoName, e);
         }
+    }
+
+    /**
+     * Returns the full recursive file tree for a single repository at the given ref.
+     * A null/blank ref resolves to the repository's default branch (HEAD).
+     */
+    @Override
+    public FileTreeNode getTree(String username, String repoName, String ref) {
+        validateUsername(username);
+        validateRepositoryName(repoName);
+
+        if (!repositoryExists(username, repoName)) {
+            throw new ResourceNotFoundException("Repository not found: " + username + "/" + repoName);
+        }
+
+        String repoPath = Paths.get(repositoriesPath, username, repoName + ".git").toString();
+        try (Repository repo = new FileRepositoryBuilder()
+                .setGitDir(new File(repoPath))
+                .setBare()
+                .build()) {
+
+            ObjectId commitId = resolveRef(repo, ref);
+            if (commitId == null) {
+                // Empty repository — return an empty root rather than 404.
+                return new FileTreeNode("root", true);
+            }
+            try (RevWalk revWalk = new RevWalk(repo)) {
+                RevCommit commit = revWalk.parseCommit(commitId);
+                return buildFileTree(repo, commit.getTree());
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read tree for " + username + "/" + repoName, e);
+        }
+    }
+
+    /**
+     * Returns the raw content of a single file (blob) at the given ref. Text files are decoded
+     * as UTF-8; binary files return {@code binary=true} with null content.
+     */
+    @Override
+    public FileContentDto getFileContent(String username, String repoName, String ref, String path) {
+        validateUsername(username);
+        validateRepositoryName(repoName);
+        if (!StringUtils.hasText(path)) {
+            throw new IllegalArgumentException("File path cannot be empty");
+        }
+
+        if (!repositoryExists(username, repoName)) {
+            throw new ResourceNotFoundException("Repository not found: " + username + "/" + repoName);
+        }
+
+        String repoPath = Paths.get(repositoriesPath, username, repoName + ".git").toString();
+        try (Repository repo = new FileRepositoryBuilder()
+                .setGitDir(new File(repoPath))
+                .setBare()
+                .build()) {
+
+            ObjectId commitId = resolveRef(repo, ref);
+            if (commitId == null) {
+                throw new ResourceNotFoundException("Repository is empty: " + username + "/" + repoName);
+            }
+
+            try (RevWalk revWalk = new RevWalk(repo)) {
+                RevCommit commit = revWalk.parseCommit(commitId);
+                try (TreeWalk treeWalk = TreeWalk.forPath(repo, path, commit.getTree())) {
+                    if (treeWalk == null) {
+                        throw new ResourceNotFoundException("File not found: " + path);
+                    }
+                    ObjectLoader loader = repo.open(treeWalk.getObjectId(0));
+                    byte[] bytes = loader.getBytes();
+                    boolean binary = isBinary(bytes);
+                    String content = binary ? null : new String(bytes, StandardCharsets.UTF_8);
+                    String resolvedRef = StringUtils.hasText(ref) ? ref : "HEAD";
+                    return new FileContentDto(path, resolvedRef, bytes.length, binary, content);
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read file " + path + " in " + username + "/" + repoName, e);
+        }
+    }
+
+    /**
+     * GitHub-style listing of one directory level. For each entry we run a path-filtered
+     * {@code git log -1} to find the commit that last modified it. Also returns the repo's
+     * latest commit on the ref for the "latest commit" bar.
+     */
+    @Override
+    public DirectoryListingDto listContents(String username, String repoName, String ref, String path) {
+        validateUsername(username);
+        validateRepositoryName(repoName);
+
+        if (!repositoryExists(username, repoName)) {
+            throw new ResourceNotFoundException("Repository not found: " + username + "/" + repoName);
+        }
+
+        String normPath = path == null ? "" : path.replaceAll("^/+|/+$", "");
+        String repoPath = Paths.get(repositoriesPath, username, repoName + ".git").toString();
+
+        try (Repository repo = new FileRepositoryBuilder()
+                .setGitDir(new File(repoPath))
+                .setBare()
+                .build()) {
+
+            ObjectId commitId = resolveRef(repo, ref);
+            String refLabel = StringUtils.hasText(ref) ? ref : "HEAD";
+
+            if (commitId == null) {
+                return new DirectoryListingDto(normPath, refLabel, null, new ArrayList<>());
+            }
+
+            try (RevWalk revWalk = new RevWalk(repo); Git git = new Git(repo)) {
+                RevCommit headCommit = revWalk.parseCommit(commitId);
+                CommitSummaryDto latest = toSummary(headCommit);
+
+                // Resolve the tree object whose immediate children we want to list.
+                ObjectId treeToList;
+                if (normPath.isEmpty()) {
+                    treeToList = headCommit.getTree();
+                } else {
+                    try (TreeWalk sub = TreeWalk.forPath(repo, normPath, headCommit.getTree())) {
+                        if (sub == null) {
+                            throw new ResourceNotFoundException("Path not found: " + normPath);
+                        }
+                        if (!sub.getFileMode(0).equals(FileMode.TREE)) {
+                            throw new IllegalArgumentException("Not a directory: " + normPath);
+                        }
+                        treeToList = sub.getObjectId(0);
+                    }
+                }
+
+                List<DirEntryDto> entries = new ArrayList<>();
+                try (TreeWalk tw = new TreeWalk(repo)) {
+                    tw.addTree(treeToList);
+                    tw.setRecursive(false);
+                    while (tw.next()) {
+                        String name = tw.getNameString();
+                        boolean isDir = tw.isSubtree();
+                        String fullPath = normPath.isEmpty() ? name : normPath + "/" + name;
+                        CommitSummaryDto last = lastCommitForPath(git, commitId, fullPath);
+                        entries.add(new DirEntryDto(
+                                name,
+                                fullPath,
+                                isDir ? "dir" : "file",
+                                last != null ? last.getMessage() : null,
+                                last != null ? last.getShortSha() : null,
+                                last != null ? last.getDate() : 0L
+                        ));
+                    }
+                }
+
+                return new DirectoryListingDto(normPath, refLabel, latest, entries);
+            }
+        } catch (IOException | GitAPIException e) {
+            throw new RuntimeException("Failed to list contents of " + username + "/" + repoName, e);
+        }
+    }
+
+    /** Most recent commit that modified {@code path}, starting from {@code start}; null if none. */
+    private CommitSummaryDto lastCommitForPath(Git git, ObjectId start, String path) throws GitAPIException, IOException {
+        Iterator<RevCommit> it = git.log().add(start).addPath(path).setMaxCount(1).call().iterator();
+        return it.hasNext() ? toSummary(it.next()) : null;
+    }
+
+    private CommitSummaryDto toSummary(RevCommit commit) {
+        String sha = commit.getName();
+        String shortSha = sha.length() >= 7 ? sha.substring(0, 7) : sha;
+        PersonIdent author = commit.getAuthorIdent();
+        long dateMillis = commit.getCommitTime() * 1000L;
+        return new CommitSummaryDto(
+                sha,
+                shortSha,
+                commit.getShortMessage(),
+                author != null ? author.getName() : null,
+                author != null ? author.getEmailAddress() : null,
+                dateMillis
+        );
+    }
+
+    /** Resolves a ref name (branch, tag, or SHA) to a commit id; null/blank falls back to HEAD. */
+    private ObjectId resolveRef(Repository repo, String ref) throws IOException {
+        if (!StringUtils.hasText(ref)) {
+            return resolveHead(repo);
+        }
+        ObjectId id = repo.resolve(ref);
+        if (id == null) {
+            id = repo.resolve("refs/heads/" + ref);
+        }
+        return id;
+    }
+
+    /** Heuristic binary detection: a NUL byte within the first 8KB marks the blob as binary. */
+    private boolean isBinary(byte[] bytes) {
+        int len = Math.min(bytes.length, 8000);
+        for (int i = 0; i < len; i++) {
+            if (bytes[i] == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // Validation methods
