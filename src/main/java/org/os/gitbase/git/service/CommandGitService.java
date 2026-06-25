@@ -13,6 +13,7 @@ import org.os.gitbase.exception.AccessDeniedDomainException;
 import org.os.gitbase.exception.ResourceNotFoundException;
 import org.os.gitbase.git.dto.GitTokenInfo;
 import org.os.gitbase.git.entity.GitToken;
+import org.os.gitbase.git.hook.PushSyncHook;
 import org.os.gitbase.git.mapper.GitTokenMapper;
 import org.os.gitbase.git.repository.GitTokenRepository;
 import org.springframework.http.HttpStatus;
@@ -38,11 +39,13 @@ public class CommandGitService  {
     private final PasswordEncoder passwordEncoder;
     private static final String BASE_PATH = "./gitbase/repositories"; // root path
     private final UserRepository userRepository;
-    public CommandGitService(GitTokenRepository repo, PasswordEncoder passwordEncoder, UserRepository userRepository, GitTokenMapper gitTokenMapper) {
+    private final PushSyncHook pushSyncHook;
+    public CommandGitService(GitTokenRepository repo, PasswordEncoder passwordEncoder, UserRepository userRepository, GitTokenMapper gitTokenMapper, PushSyncHook pushSyncHook) {
         this.repo = repo;
         this.passwordEncoder = passwordEncoder;
         this.userRepository = userRepository;
         this.gitTokenMapper = gitTokenMapper;
+        this.pushSyncHook = pushSyncHook;
     }
 
     private Repository openRepository(String username, String repoName) throws IOException {
@@ -237,13 +240,10 @@ public class CommandGitService  {
         rp.setAllowDeletes(true);
         rp.setAllowNonFastForwards(true);
 
-        // Logging hooks (replace with ACL / auth hooks)
         rp.setPreReceiveHook((receivePack, commands) ->
                 log.debug("Pre-receive hook: {} commands", commands.size()));
-        rp.setPostReceiveHook((receivePack, commands) -> {
-            long ok = commands.stream().filter(c -> c.getResult() == ReceiveCommand.Result.OK).count();
-            log.info("Post-receive: {} successful commands", ok);
-        });
+        // Mirror the push into the database (commits / branch heads / activity).
+        rp.setPostReceiveHook(pushSyncHook);
     }
     private void sendError(HttpServletResponse response, int status, String message) {
         try {

@@ -24,6 +24,7 @@ import org.eclipse.jgit.treewalk.EmptyTreeIterator;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.os.gitbase.auth.entity.User;
 import org.os.gitbase.auth.repository.UserRepository;
+import org.os.gitbase.git.dto.BranchSummaryDto;
 import org.os.gitbase.git.dto.CommitDetailDto;
 import org.os.gitbase.git.dto.CommitPageDto;
 import org.os.gitbase.git.dto.CommitSummaryDto;
@@ -790,6 +791,49 @@ public class GitServiceImpl implements GitService {
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to load commit " + sha + " in " + username + "/" + repoName, e);
+        }
+    }
+
+    /**
+     * Lists local branches (refs/heads) with their head commit SHA, flagging the one HEAD points at.
+     * Read live from JGit so it always reflects on-disk state.
+     */
+    @Override
+    public List<BranchSummaryDto> listBranches(String username, String repoName) {
+        validateUsername(username);
+        validateRepositoryName(repoName);
+        if (!repositoryExists(username, repoName)) {
+            throw new ResourceNotFoundException("Repository not found: " + username + "/" + repoName);
+        }
+
+        String repoPath = Paths.get(repositoriesPath, username, repoName + ".git").toString();
+        try (Repository repo = new FileRepositoryBuilder()
+                .setGitDir(new File(repoPath))
+                .setBare()
+                .build()) {
+
+            String headBranch = null;
+            Ref head = repo.exactRef(Constants.HEAD);
+            if (head != null && head.isSymbolic() && head.getTarget() != null) {
+                headBranch = head.getTarget().getName();
+            }
+
+            List<BranchSummaryDto> branches = new ArrayList<>();
+            for (Ref ref : repo.getRefDatabase().getRefsByPrefix(Constants.R_HEADS)) {
+                ObjectId id = ref.getObjectId();
+                String sha = id != null ? id.getName() : "";
+                String shortSha = sha.length() >= 7 ? sha.substring(0, 7) : sha;
+                String name = ref.getName().substring(Constants.R_HEADS.length());
+                boolean isDefault = ref.getName().equals(headBranch);
+                branches.add(new BranchSummaryDto(name, sha, shortSha, isDefault));
+            }
+            branches.sort((a, b) -> {
+                if (a.isDefault() != b.isDefault()) return a.isDefault() ? -1 : 1;
+                return a.getName().compareTo(b.getName());
+            });
+            return branches;
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to list branches for " + username + "/" + repoName, e);
         }
     }
 

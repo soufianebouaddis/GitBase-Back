@@ -3,6 +3,7 @@ package org.os.gitbase.git.controller;
 import jakarta.validation.Valid;
 import org.os.gitbase.common.ApiResponseEntity;
 import org.os.gitbase.exception.AccessDeniedDomainException;
+import org.os.gitbase.git.dto.BranchSummaryDto;
 import org.os.gitbase.git.dto.CommitDetailDto;
 import org.os.gitbase.git.dto.CommitPageDto;
 import org.os.gitbase.git.dto.CreateRepositoryDto;
@@ -108,6 +109,15 @@ public class GitController {
             @RequestParam(required = false, defaultValue = "") String path) {
         DirectoryListingDto listing = gitService.listContents(username, repoName, ref, path);
         return ResponseEntity.ok(ApiResponseEntity.ok(listing, "Directory listing retrieved"));
+    }
+
+    // -------------------- LIST BRANCHES --------------------
+    @GetMapping("/{username}/{repoName}/branches")
+    public ResponseEntity<ApiResponseEntity<List<BranchSummaryDto>>> listBranches(
+            @PathVariable String username,
+            @PathVariable String repoName) {
+        List<BranchSummaryDto> branches = gitService.listBranches(username, repoName);
+        return ResponseEntity.ok(ApiResponseEntity.ok(branches, "Branches retrieved"));
     }
 
     // -------------------- COMMIT HISTORY --------------------

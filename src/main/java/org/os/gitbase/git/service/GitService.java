@@ -3,6 +3,7 @@ package org.os.gitbase.git.service;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.os.gitbase.auth.entity.User;
+import org.os.gitbase.git.dto.BranchSummaryDto;
 import org.os.gitbase.git.dto.CommitDetailDto;
 import org.os.gitbase.git.dto.CommitPageDto;
 import org.os.gitbase.git.dto.DirectoryListingDto;
@@ -36,6 +37,9 @@ public interface GitService {
 
     /** Full metadata and per-file diff (vs first parent) for a single commit. */
     CommitDetailDto getCommitDetail(String username, String repoName, String sha);
+
+    /** Live list of local branches (refs/heads) with their head commit; default branch flagged. */
+    List<BranchSummaryDto> listBranches(String username, String repoName);
 
     void handleReceivePack(String username, String repoName, HttpServletRequest request, HttpServletResponse response);
     void handleUploadPack(String username, String repoName,

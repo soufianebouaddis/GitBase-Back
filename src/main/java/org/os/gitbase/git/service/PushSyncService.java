@@ -114,6 +114,42 @@ public class PushSyncService {
         }
     }
 
+    /**
+     * Reconciles a repository's current on-disk state into the DB: walks every local branch and
+     * upserts its commits + head. Idempotent (dedup on commit hash), so it is safe to run on
+     * startup and after pushes to back-fill repositories that were pushed before sync existed.
+     */
+    @Transactional
+    public void reconcile(Repository repo, String username, String repoName) {
+        Optional<RepositoryGit> repoOpt = repositoryDB.findByOwnerNameAndRepoName(username, repoName);
+        if (repoOpt.isEmpty()) {
+            log.warn("Reconcile skipped: no DB record for {}/{}", username, repoName);
+            return;
+        }
+        RepositoryGit repoEntity = repoOpt.get();
+
+        int total = 0;
+        try {
+            for (Ref ref : repo.getRefDatabase().getRefsByPrefix(Constants.R_HEADS)) {
+                String branchName = ref.getName().substring(Constants.R_HEADS.length());
+                ObjectId tip = ref.getObjectId();
+                if (tip == null) {
+                    continue;
+                }
+                try {
+                    total += syncBranch(repo, repoEntity, branchName, ObjectId.zeroId(), tip);
+                } catch (Exception e) {
+                    log.error("Reconcile failed for {}/{} branch {}: {}", username, repoName, branchName, e.getMessage());
+                }
+            }
+            if (total > 0) {
+                log.info("Reconciled {}/{}: {} new commit(s) imported", username, repoName, total);
+            }
+        } catch (Exception e) {
+            log.error("Reconcile failed for {}/{}: {}", username, repoName, e.getMessage(), e);
+        }
+    }
+
     /** Walks new commits on a branch, persists them, and moves the branch head. Returns # newly inserted. */
     private int syncBranch(Repository repo, RepositoryGit repoEntity, String branchName,
                            ObjectId oldId, ObjectId newId) throws Exception {
