@@ -3,8 +3,14 @@ package org.os.gitbase.git.service;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.LogCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.diff.DiffFormatter;
+import org.eclipse.jgit.diff.Edit;
+import org.eclipse.jgit.diff.RawTextComparator;
 import org.eclipse.jgit.lib.*;
+import org.eclipse.jgit.patch.FileHeader;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevTree;
 import org.eclipse.jgit.revwalk.RevWalk;
@@ -12,11 +18,17 @@ import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.RefAdvertiser;
 import org.eclipse.jgit.transport.UploadPack;
+import org.eclipse.jgit.treewalk.AbstractTreeIterator;
+import org.eclipse.jgit.treewalk.CanonicalTreeParser;
+import org.eclipse.jgit.treewalk.EmptyTreeIterator;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.os.gitbase.auth.entity.User;
 import org.os.gitbase.auth.repository.UserRepository;
+import org.os.gitbase.git.dto.CommitDetailDto;
+import org.os.gitbase.git.dto.CommitPageDto;
 import org.os.gitbase.git.dto.CommitSummaryDto;
 import org.os.gitbase.git.dto.DirEntryDto;
+import org.os.gitbase.git.dto.FileDiffDto;
 import org.os.gitbase.git.dto.DirectoryListingDto;
 import org.os.gitbase.git.dto.FileContentDto;
 import org.os.gitbase.git.dto.FileTreeNode;
@@ -29,6 +41,7 @@ import org.os.gitbase.exception.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -625,6 +638,168 @@ public class GitServiceImpl implements GitService {
             }
         }
         return false;
+    }
+
+    /**
+     * Paginated commit history for a ref (default branch when ref is null/blank), optionally
+     * filtered to commits touching {@code path}. Read live from JGit via {@code git log}.
+     */
+    @Override
+    public CommitPageDto listCommitHistory(String username, String repoName, String ref, String path, int page, int size) {
+        validateUsername(username);
+        validateRepositoryName(repoName);
+        if (!repositoryExists(username, repoName)) {
+            throw new ResourceNotFoundException("Repository not found: " + username + "/" + repoName);
+        }
+
+        int safePage = Math.max(page, 0);
+        int safeSize = (size <= 0 || size > 100) ? 30 : size;
+        String refLabel = StringUtils.hasText(ref) ? ref : "HEAD";
+
+        String repoPath = Paths.get(repositoriesPath, username, repoName + ".git").toString();
+        try (Repository repo = new FileRepositoryBuilder()
+                .setGitDir(new File(repoPath))
+                .setBare()
+                .build()) {
+
+            ObjectId startId = resolveRef(repo, ref);
+            if (startId == null) {
+                return new CommitPageDto(refLabel, safePage, safeSize, false, new ArrayList<>());
+            }
+
+            try (Git git = new Git(repo)) {
+                LogCommand log = git.log().add(startId);
+                if (StringUtils.hasText(path)) {
+                    log.addPath(path.replaceAll("^/+|/+$", ""));
+                }
+                // Fetch one extra commit to detect whether a next page exists.
+                log.setSkip(safePage * safeSize).setMaxCount(safeSize + 1);
+
+                List<CommitSummaryDto> commits = new ArrayList<>();
+                boolean hasNext = false;
+                int count = 0;
+                for (RevCommit c : log.call()) {
+                    if (count == safeSize) {
+                        hasNext = true;
+                        break;
+                    }
+                    commits.add(toSummary(c));
+                    count++;
+                }
+                return new CommitPageDto(refLabel, safePage, safeSize, hasNext, commits);
+            }
+        } catch (IOException | GitAPIException e) {
+            throw new RuntimeException("Failed to list commits for " + username + "/" + repoName, e);
+        }
+    }
+
+    /**
+     * Full metadata and per-file unified diff for a single commit, compared against its first
+     * parent (or the empty tree for a root commit). Binary files report {@code binary=true}
+     * with null patch text.
+     */
+    @Override
+    public CommitDetailDto getCommitDetail(String username, String repoName, String sha) {
+        validateUsername(username);
+        validateRepositoryName(repoName);
+        if (!StringUtils.hasText(sha)) {
+            throw new IllegalArgumentException("Commit sha cannot be empty");
+        }
+        if (!repositoryExists(username, repoName)) {
+            throw new ResourceNotFoundException("Repository not found: " + username + "/" + repoName);
+        }
+
+        String repoPath = Paths.get(repositoriesPath, username, repoName + ".git").toString();
+        try (Repository repo = new FileRepositoryBuilder()
+                .setGitDir(new File(repoPath))
+                .setBare()
+                .build()) {
+
+            ObjectId commitId = repo.resolve(sha);
+            if (commitId == null) {
+                throw new ResourceNotFoundException("Commit not found: " + sha);
+            }
+
+            try (RevWalk walk = new RevWalk(repo)) {
+                RevCommit commit = walk.parseCommit(commitId);
+                RevCommit parent = commit.getParentCount() > 0
+                        ? walk.parseCommit(commit.getParent(0).getId())
+                        : null;
+
+                List<String> parents = new ArrayList<>();
+                for (RevCommit p : commit.getParents()) {
+                    parents.add(p.getName());
+                }
+
+                List<FileDiffDto> files = new ArrayList<>();
+                int totalAdd = 0;
+                int totalDel = 0;
+
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                try (DiffFormatter df = new DiffFormatter(out)) {
+                    df.setRepository(repo);
+                    df.setDiffComparator(RawTextComparator.DEFAULT);
+                    df.setDetectRenames(true);
+
+                    AbstractTreeIterator oldTree = parent == null
+                            ? new EmptyTreeIterator()
+                            : prepareTreeParser(repo, parent.getTree());
+                    AbstractTreeIterator newTree = prepareTreeParser(repo, commit.getTree());
+
+                    for (DiffEntry de : df.scan(oldTree, newTree)) {
+                        out.reset();
+                        df.format(de);
+                        df.flush();
+                        String patch = out.toString(StandardCharsets.UTF_8);
+
+                        FileHeader header = df.toFileHeader(de);
+                        int add = 0;
+                        int del = 0;
+                        for (Edit edit : header.toEditList()) {
+                            add += edit.getEndB() - edit.getBeginB();
+                            del += edit.getEndA() - edit.getBeginA();
+                        }
+                        boolean binary = header.getPatchType() != FileHeader.PatchType.UNIFIED;
+
+                        String newPath = de.getChangeType() == DiffEntry.ChangeType.DELETE
+                                ? de.getOldPath() : de.getNewPath();
+                        String oldPath = (de.getChangeType() == DiffEntry.ChangeType.RENAME
+                                || de.getChangeType() == DiffEntry.ChangeType.COPY)
+                                ? de.getOldPath() : null;
+
+                        totalAdd += add;
+                        totalDel += del;
+                        files.add(new FileDiffDto(newPath, oldPath, de.getChangeType().name(),
+                                add, del, binary, binary ? null : patch));
+                    }
+                }
+
+                CommitSummaryDto summary = toSummary(commit);
+                return new CommitDetailDto(
+                        commit.getName(),
+                        summary.getShortSha(),
+                        commit.getFullMessage() != null ? commit.getFullMessage().trim() : "",
+                        summary.getAuthorName(),
+                        summary.getAuthorEmail(),
+                        summary.getDate(),
+                        parents,
+                        totalAdd,
+                        totalDel,
+                        files
+                );
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load commit " + sha + " in " + username + "/" + repoName, e);
+        }
+    }
+
+    /** Loads a tree into a CanonicalTreeParser for diffing. */
+    private AbstractTreeIterator prepareTreeParser(Repository repo, RevTree tree) throws IOException {
+        try (ObjectReader reader = repo.newObjectReader()) {
+            CanonicalTreeParser parser = new CanonicalTreeParser();
+            parser.reset(reader, tree.getId());
+            return parser;
+        }
     }
 
     // Validation methods

@@ -3,6 +3,8 @@ package org.os.gitbase.git.controller;
 import jakarta.validation.Valid;
 import org.os.gitbase.common.ApiResponseEntity;
 import org.os.gitbase.exception.AccessDeniedDomainException;
+import org.os.gitbase.git.dto.CommitDetailDto;
+import org.os.gitbase.git.dto.CommitPageDto;
 import org.os.gitbase.git.dto.CreateRepositoryDto;
 import org.os.gitbase.git.dto.DirectoryListingDto;
 import org.os.gitbase.git.dto.FileContentDto;
@@ -106,6 +108,29 @@ public class GitController {
             @RequestParam(required = false, defaultValue = "") String path) {
         DirectoryListingDto listing = gitService.listContents(username, repoName, ref, path);
         return ResponseEntity.ok(ApiResponseEntity.ok(listing, "Directory listing retrieved"));
+    }
+
+    // -------------------- COMMIT HISTORY --------------------
+    @GetMapping("/{username}/{repoName}/commits")
+    public ResponseEntity<ApiResponseEntity<CommitPageDto>> listCommits(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            @RequestParam(required = false) String ref,
+            @RequestParam(required = false) String path,
+            @RequestParam(required = false, defaultValue = "0") int page,
+            @RequestParam(required = false, defaultValue = "30") int size) {
+        CommitPageDto commits = gitService.listCommitHistory(username, repoName, ref, path, page, size);
+        return ResponseEntity.ok(ApiResponseEntity.ok(commits, "Commit history retrieved"));
+    }
+
+    // -------------------- COMMIT DETAIL + DIFF --------------------
+    @GetMapping("/{username}/{repoName}/commits/{sha}")
+    public ResponseEntity<ApiResponseEntity<CommitDetailDto>> getCommitDetail(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            @PathVariable String sha) {
+        CommitDetailDto detail = gitService.getCommitDetail(username, repoName, sha);
+        return ResponseEntity.ok(ApiResponseEntity.ok(detail, "Commit detail retrieved"));
     }
 
     // -------------------- VIEW FILE CONTENT --------------------

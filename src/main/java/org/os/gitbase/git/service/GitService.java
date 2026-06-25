@@ -3,6 +3,8 @@ package org.os.gitbase.git.service;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.os.gitbase.auth.entity.User;
+import org.os.gitbase.git.dto.CommitDetailDto;
+import org.os.gitbase.git.dto.CommitPageDto;
 import org.os.gitbase.git.dto.DirectoryListingDto;
 import org.os.gitbase.git.dto.FileContentDto;
 import org.os.gitbase.git.dto.FileTreeNode;
@@ -28,6 +30,13 @@ public interface GitService {
      * carries the commit that last modified it, plus the repo's latest commit on the ref.
      */
     DirectoryListingDto listContents(String username, String repoName, String ref, String path);
+
+    /** Paginated commit history for a ref, optionally filtered to a single path. */
+    CommitPageDto listCommitHistory(String username, String repoName, String ref, String path, int page, int size);
+
+    /** Full metadata and per-file diff (vs first parent) for a single commit. */
+    CommitDetailDto getCommitDetail(String username, String repoName, String sha);
+
     void handleReceivePack(String username, String repoName, HttpServletRequest request, HttpServletResponse response);
     void handleUploadPack(String username, String repoName,
                                  HttpServletRequest request,
