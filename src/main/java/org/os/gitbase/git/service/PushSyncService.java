@@ -8,6 +8,7 @@ import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.ReceiveCommand;
 import org.os.gitbase.auth.entity.User;
 import org.os.gitbase.auth.repository.UserRepository;
@@ -21,6 +22,7 @@ import org.os.gitbase.git.repository.GitRepositoryDB;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.File;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -44,6 +46,8 @@ import java.util.Optional;
 @Slf4j
 @Service
 public class PushSyncService {
+
+    private static final String BASE_PATH = "./gitbase/repositories";
 
     private final GitRepositoryDB repositoryDB;
     private final CommitRepository commitRepository;
@@ -111,6 +115,35 @@ public class PushSyncService {
             } catch (Exception e) {
                 log.error("Failed to log PUSH activity for {}/{}: {}", username, repoName, e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Lazy, O(1)-guarded sync used on the read path. If the repository's current HEAD commit is
+     * already stored, returns immediately (one indexed lookup). Otherwise it reconciles once. This
+     * replaces eager startup loading: only repositories that are actually accessed get synced, and
+     * only when their tip has advanced beyond what the DB knows — so it scales to millions of repos.
+     * Never throws; reads stay live on JGit regardless.
+     */
+    @Transactional
+    public void ensureSynced(String username, String repoName) {
+        try {
+            File gitDir = new File(BASE_PATH + "/" + username + "/" + repoName + ".git");
+            if (!gitDir.exists()) {
+                return;
+            }
+            try (Repository repo = new FileRepositoryBuilder().setGitDir(gitDir).setBare().build()) {
+                ObjectId head = repo.resolve(Constants.HEAD);
+                if (head == null) {
+                    return; // empty / unborn repository — nothing to sync
+                }
+                if (commitRepository.findByCommitHash(head.getName()).isPresent()) {
+                    return; // tip already mirrored — fast path
+                }
+                reconcile(repo, username, repoName);
+            }
+        } catch (Exception e) {
+            log.warn("Lazy sync failed for {}/{}: {}", username, repoName, e.getMessage());
         }
     }
 

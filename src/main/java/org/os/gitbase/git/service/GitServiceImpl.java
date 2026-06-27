@@ -14,6 +14,7 @@ import org.eclipse.jgit.patch.FileHeader;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevTree;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.revwalk.filter.RevFilter;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.RefAdvertiser;
@@ -28,6 +29,7 @@ import org.os.gitbase.git.dto.BranchSummaryDto;
 import org.os.gitbase.git.dto.CommitDetailDto;
 import org.os.gitbase.git.dto.CommitPageDto;
 import org.os.gitbase.git.dto.CommitSummaryDto;
+import org.os.gitbase.git.dto.CompareDto;
 import org.os.gitbase.git.dto.DirEntryDto;
 import org.os.gitbase.git.dto.FileDiffDto;
 import org.os.gitbase.git.dto.DirectoryListingDto;
@@ -732,48 +734,8 @@ public class GitServiceImpl implements GitService {
                     parents.add(p.getName());
                 }
 
-                List<FileDiffDto> files = new ArrayList<>();
-                int totalAdd = 0;
-                int totalDel = 0;
-
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                try (DiffFormatter df = new DiffFormatter(out)) {
-                    df.setRepository(repo);
-                    df.setDiffComparator(RawTextComparator.DEFAULT);
-                    df.setDetectRenames(true);
-
-                    AbstractTreeIterator oldTree = parent == null
-                            ? new EmptyTreeIterator()
-                            : prepareTreeParser(repo, parent.getTree());
-                    AbstractTreeIterator newTree = prepareTreeParser(repo, commit.getTree());
-
-                    for (DiffEntry de : df.scan(oldTree, newTree)) {
-                        out.reset();
-                        df.format(de);
-                        df.flush();
-                        String patch = out.toString(StandardCharsets.UTF_8);
-
-                        FileHeader header = df.toFileHeader(de);
-                        int add = 0;
-                        int del = 0;
-                        for (Edit edit : header.toEditList()) {
-                            add += edit.getEndB() - edit.getBeginB();
-                            del += edit.getEndA() - edit.getBeginA();
-                        }
-                        boolean binary = header.getPatchType() != FileHeader.PatchType.UNIFIED;
-
-                        String newPath = de.getChangeType() == DiffEntry.ChangeType.DELETE
-                                ? de.getOldPath() : de.getNewPath();
-                        String oldPath = (de.getChangeType() == DiffEntry.ChangeType.RENAME
-                                || de.getChangeType() == DiffEntry.ChangeType.COPY)
-                                ? de.getOldPath() : null;
-
-                        totalAdd += add;
-                        totalDel += del;
-                        files.add(new FileDiffDto(newPath, oldPath, de.getChangeType().name(),
-                                add, del, binary, binary ? null : patch));
-                    }
-                }
+                RevTree oldTree = parent == null ? null : parent.getTree();
+                DiffResult diff = computeDiff(repo, oldTree, commit.getTree(), Integer.MAX_VALUE, Integer.MAX_VALUE);
 
                 CommitSummaryDto summary = toSummary(commit);
                 return new CommitDetailDto(
@@ -784,9 +746,9 @@ public class GitServiceImpl implements GitService {
                         summary.getAuthorEmail(),
                         summary.getDate(),
                         parents,
-                        totalAdd,
-                        totalDel,
-                        files
+                        diff.additions(),
+                        diff.deletions(),
+                        diff.files()
                 );
             }
         } catch (IOException e) {
@@ -835,6 +797,153 @@ public class GitServiceImpl implements GitService {
         } catch (IOException e) {
             throw new RuntimeException("Failed to list branches for " + username + "/" + repoName, e);
         }
+    }
+
+    /** Diff-display limits (per pull-requests feature spec): truncate very large diffs. */
+    private static final int MAX_DIFF_FILES = 500;
+    private static final int MAX_DIFF_LINES = 50_000;
+
+    /**
+     * Three-way comparison of two refs — the basis of a pull request. Computes ahead/behind counts,
+     * the commits {@code head} adds over {@code base}, and the diff from their merge base to {@code head}
+     * (so changes already present on {@code base} are excluded). Large diffs are truncated.
+     */
+    @Override
+    public CompareDto compare(String username, String repoName, String base, String head) {
+        validateUsername(username);
+        validateRepositoryName(repoName);
+        if (!StringUtils.hasText(base) || !StringUtils.hasText(head)) {
+            throw new IllegalArgumentException("Both base and head refs are required");
+        }
+        if (!repositoryExists(username, repoName)) {
+            throw new ResourceNotFoundException("Repository not found: " + username + "/" + repoName);
+        }
+
+        String repoPath = Paths.get(repositoriesPath, username, repoName + ".git").toString();
+        try (Repository repo = new FileRepositoryBuilder()
+                .setGitDir(new File(repoPath))
+                .setBare()
+                .build()) {
+
+            ObjectId baseId = resolveRef(repo, base);
+            ObjectId headId = resolveRef(repo, head);
+            if (baseId == null) {
+                throw new ResourceNotFoundException("Base ref not found: " + base);
+            }
+            if (headId == null) {
+                throw new ResourceNotFoundException("Head ref not found: " + head);
+            }
+
+            try (RevWalk walk = new RevWalk(repo)) {
+                RevCommit baseCommit = walk.parseCommit(baseId);
+                RevCommit headCommit = walk.parseCommit(headId);
+
+                // Merge base (three-way anchor).
+                RevCommit mergeBase;
+                try (RevWalk mbWalk = new RevWalk(repo)) {
+                    mbWalk.setRevFilter(RevFilter.MERGE_BASE);
+                    mbWalk.markStart(mbWalk.parseCommit(baseId));
+                    mbWalk.markStart(mbWalk.parseCommit(headId));
+                    mergeBase = mbWalk.next();
+                }
+
+                List<CommitSummaryDto> commits = new ArrayList<>();
+                int aheadBy = collectRange(repo, headId, baseId, commits);   // head not in base
+                int behindBy = collectRange(repo, baseId, headId, null);     // base not in head
+
+                RevTree oldTree = mergeBase != null ? walk.parseCommit(mergeBase).getTree() : null;
+                DiffResult diff = computeDiff(repo, oldTree, headCommit.getTree(), MAX_DIFF_FILES, MAX_DIFF_LINES);
+
+                return new CompareDto(
+                        base,
+                        head,
+                        mergeBase != null ? mergeBase.getName() : null,
+                        aheadBy,
+                        behindBy,
+                        commits,
+                        diff.additions(),
+                        diff.deletions(),
+                        diff.truncated(),
+                        diff.files()
+                );
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to compare " + base + "..." + head + " in " + username + "/" + repoName, e);
+        }
+    }
+
+    /** Commits reachable from {@code include} but not {@code exclude}; appends summaries to {@code sink} if non-null. Returns the count. */
+    private int collectRange(Repository repo, ObjectId include, ObjectId exclude, List<CommitSummaryDto> sink) throws IOException {
+        int count = 0;
+        try (RevWalk walk = new RevWalk(repo)) {
+            walk.markStart(walk.parseCommit(include));
+            walk.markUninteresting(walk.parseCommit(exclude));
+            for (RevCommit c : walk) {
+                if (sink != null) {
+                    sink.add(toSummary(c));
+                }
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** Holder for a computed diff. */
+    private record DiffResult(List<FileDiffDto> files, int additions, int deletions, boolean truncated) {}
+
+    /**
+     * Computes the per-file diff between two trees (a null {@code oldTree} means the empty tree, i.e. all
+     * additions). Stops and flags {@code truncated} once the file or line budget is exceeded.
+     */
+    private DiffResult computeDiff(Repository repo, RevTree oldTree, RevTree newTree, int maxFiles, int maxLines) throws IOException {
+        List<FileDiffDto> files = new ArrayList<>();
+        int totalAdd = 0;
+        int totalDel = 0;
+        int lineCount = 0;
+        boolean truncated = false;
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (DiffFormatter df = new DiffFormatter(out)) {
+            df.setRepository(repo);
+            df.setDiffComparator(RawTextComparator.DEFAULT);
+            df.setDetectRenames(true);
+
+            AbstractTreeIterator oldIt = oldTree == null ? new EmptyTreeIterator() : prepareTreeParser(repo, oldTree);
+            AbstractTreeIterator newIt = prepareTreeParser(repo, newTree);
+
+            for (DiffEntry de : df.scan(oldIt, newIt)) {
+                if (files.size() >= maxFiles || lineCount >= maxLines) {
+                    truncated = true;
+                    break;
+                }
+                out.reset();
+                df.format(de);
+                df.flush();
+                String patch = out.toString(StandardCharsets.UTF_8);
+
+                FileHeader header = df.toFileHeader(de);
+                int add = 0;
+                int del = 0;
+                for (Edit edit : header.toEditList()) {
+                    add += edit.getEndB() - edit.getBeginB();
+                    del += edit.getEndA() - edit.getBeginA();
+                }
+                boolean binary = header.getPatchType() != FileHeader.PatchType.UNIFIED;
+
+                String newPath = de.getChangeType() == DiffEntry.ChangeType.DELETE
+                        ? de.getOldPath() : de.getNewPath();
+                String oldPath = (de.getChangeType() == DiffEntry.ChangeType.RENAME
+                        || de.getChangeType() == DiffEntry.ChangeType.COPY)
+                        ? de.getOldPath() : null;
+
+                totalAdd += add;
+                totalDel += del;
+                lineCount += add + del;
+                files.add(new FileDiffDto(newPath, oldPath, de.getChangeType().name(),
+                        add, del, binary, binary ? null : patch));
+            }
+        }
+        return new DiffResult(files, totalAdd, totalDel, truncated);
     }
 
     /** Loads a tree into a CanonicalTreeParser for diffing. */

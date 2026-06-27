@@ -6,6 +6,7 @@ import org.os.gitbase.exception.AccessDeniedDomainException;
 import org.os.gitbase.git.dto.BranchSummaryDto;
 import org.os.gitbase.git.dto.CommitDetailDto;
 import org.os.gitbase.git.dto.CommitPageDto;
+import org.os.gitbase.git.dto.CompareDto;
 import org.os.gitbase.git.dto.CreateRepositoryDto;
 import org.os.gitbase.git.dto.DirectoryListingDto;
 import org.os.gitbase.git.dto.FileContentDto;
@@ -15,6 +16,7 @@ import org.os.gitbase.git.dto.RepositoryTreeDto;
 import org.os.gitbase.git.entity.enums.ActivityType;
 import org.os.gitbase.git.service.ActivityService;
 import org.os.gitbase.git.service.GitService;
+import org.os.gitbase.git.service.PushSyncService;
 import org.os.gitbase.helper.Helper;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -34,10 +36,12 @@ public class GitController {
 
     private final GitService gitService;
     private final ActivityService activityService;
+    private final PushSyncService pushSyncService;
 
-    public GitController(GitService gitService, ActivityService activityService) {
+    public GitController(GitService gitService, ActivityService activityService, PushSyncService pushSyncService) {
         this.gitService = gitService;
         this.activityService = activityService;
+        this.pushSyncService = pushSyncService;
     }
 
     // -------------------- CREATE REPOSITORY --------------------
@@ -116,8 +120,20 @@ public class GitController {
     public ResponseEntity<ApiResponseEntity<List<BranchSummaryDto>>> listBranches(
             @PathVariable String username,
             @PathVariable String repoName) {
+        pushSyncService.ensureSynced(username, repoName);
         List<BranchSummaryDto> branches = gitService.listBranches(username, repoName);
         return ResponseEntity.ok(ApiResponseEntity.ok(branches, "Branches retrieved"));
+    }
+
+    // -------------------- COMPARE (PR basis) --------------------
+    @GetMapping("/{username}/{repoName}/compare")
+    public ResponseEntity<ApiResponseEntity<CompareDto>> compare(
+            @PathVariable String username,
+            @PathVariable String repoName,
+            @RequestParam String base,
+            @RequestParam String head) {
+        CompareDto result = gitService.compare(username, repoName, base, head);
+        return ResponseEntity.ok(ApiResponseEntity.ok(result, "Comparison computed"));
     }
 
     // -------------------- COMMIT HISTORY --------------------
@@ -129,6 +145,7 @@ public class GitController {
             @RequestParam(required = false) String path,
             @RequestParam(required = false, defaultValue = "0") int page,
             @RequestParam(required = false, defaultValue = "30") int size) {
+        pushSyncService.ensureSynced(username, repoName);
         CommitPageDto commits = gitService.listCommitHistory(username, repoName, ref, path, page, size);
         return ResponseEntity.ok(ApiResponseEntity.ok(commits, "Commit history retrieved"));
     }
